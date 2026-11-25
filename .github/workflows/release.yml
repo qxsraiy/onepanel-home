@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（如 3.11.0）'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: linux-x64
+          - arch: linux-arm64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 安装前端依赖并构建
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: 安装后端生产依赖
+        working-directory: backend
+        run: |
+          npm ci --omit=dev --no-audit --no-fund
+          rm -rf node_modules/.cache
+
+      - name: 组装发布包
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          if [ -z "$VER" ] || [ "$VER" = "main" ]; then VER="${{ github.event.inputs.version }}"; fi
+          OUT="onepanel-${VER}-${{ matrix.arch }}"
+          mkdir -p "dist/$OUT"
+          cp -r backend "dist/$OUT/backend"
+          cp -r shared "dist/$OUT/shared" 2>/dev/null || true
+          cp start.sh upgrade.sh install.sh "dist/$OUT/" 2>/dev/null || true
+          rm -rf "dist/$OUT/backend/node_modules/.bin"
+          rm -f "dist/$OUT/backend/prisma/"*.db
+          echo "$VER" > "dist/$OUT/.version"
+          cd dist
+          tar -czf "${OUT}.tar.gz" "$OUT"
+          sha256sum "${OUT}.tar.gz" > "${OUT}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.arch }}
+          path: dist/*.tar.gz*
+
+  portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 构建前端
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: 打包单文件版
+        working-directory: backend
+        shell: pwsh
+        run: |
+          npm ci --omit=dev --no-audit --no-fund
+          $ver = (Get-Content package.json | ConvertFrom-Json).version
+          $out = "..\dist\onepanel-portable-v$ver-win-x64"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item -Recurse -Force . "$out\backend"
+          Copy-Item -Recurse -Force ..\frontend\dist\* "$out\backend\public\"
+          Set-Content "$out\portable.marker" "v$ver"
+          Get-ChildItem "$out\backend\node_modules\.bin" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+          Get-ChildItem "$out\backend\prisma\*.db" -ErrorAction SilentlyContinue | Remove-Item -Force
+          Compress-Archive -Path $out -DestinationPath "..\dist\onepanel-portable-v$ver-win-x64.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-win-x64
+          path: dist/*.zip
+
+  release:
+    needs: [build, portable]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 汇总产物
+        run: |
+          mkdir -p out
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.tar.gz.sha256' -o -name '*.zip' \) -exec cp {} out/ \;
+          ls -lh out/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false

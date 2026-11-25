@@ -1,0 +1,26 @@
+services:
+  onepanel:
+    image: ghcr.io/qxsraiy/onepanel:latest
+    container_name: onepanel
+    restart: unless-stopped
+    ports:
+      - "5266:5266"
+    volumes:
+      - ./data:/data
+      - ./backups:/backups
+    environment:
+      - PORT=5266
+      - OP_DATA_DIR=/data
+      - DATABASE_URL=file:/data/onepanel.db
+      - NODE_ENV=production
+      # 多节点 / HTTPS 时再填：
+      # - COOKIE_DOMAIN=.yourdomain.com
+      # - COOKIE_SECURE=1
+      # - WEBAUTHN_RP_ID=yourdomain.com
+      # - WEBAUTHN_HOSTS=cn.yourdomain.com,us.yourdomain.com
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5266/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
