@@ -25,6 +25,7 @@ DATA_DIR="/var/lib/onepanel"
 AUTO_UPDATE=0
 USE_SYSTEMD=1
 WANT_VERSION=""
+LOCAL_PKG=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -34,10 +35,43 @@ while [[ $# -gt 0 ]]; do
     --auto-update) AUTO_UPDATE=1; shift ;;
     --no-systemd) USE_SYSTEMD=0; shift ;;
     --version) WANT_VERSION="$2"; shift 2 ;;
+    --pkg) LOCAL_PKG="$2"; shift 2 ;;
     *) echo "未知参数: $1"; exit 1 ;;
   esac
 done
 
+# ---------- GitHub 加速镜像 ----------
+# 国内直连 GitHub 经常超时。按顺序尝试：
+#   1) 用户指定的 GH_PROXY   2) 直连   3) 常见公共镜像
+# 找到能用的就记住，后续所有 GitHub 请求都走它。
+GITHUB_MIRRORS=()
+if [[ -n "${GH_PROXY:-}" ]]; then GITHUB_MIRRORS+=("${GH_PROXY%/}/"); fi
+GITHUB_MIRRORS+=("" "https://ghfast.top/" "https://gh-proxy.com/" "https://ghproxy.net/")
+ACTIVE_MIRROR=""
+
+# 带镜像回退的下载：gh_fetch <原始URL> <输出文件> [超时秒]
+gh_fetch() {
+  local url="$1" out="$2" tmo="${3:-30}"
+  local m try
+  for m in "${GITHUB_MIRRORS[@]}"; do
+    try="${m}${url}"
+    if curl -fsSL --connect-timeout 10 --max-time "$tmo" -o "$out" "$try" 2>/dev/null; then
+      [ -n "$m" ] && log "已通过镜像加速：$m"
+      ACTIVE_MIRROR="$m"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# 带镜像回退的文本读取：gh_text <原始URL>
+gh_text() {
+  local url="$1" m r
+  for m in "${GITHUB_MIRRORS[@]}"; do
+    r="$(curl -fsSL --connect-timeout 10 --max-time 25 "${m}${url}" 2>/dev/null)" && { echo "$r"; return 0; }
+  done
+  return 1
+}
 log() { echo -e "\033[36m[onepanel]\033[0m $*"; }
 err() { echo -e "\033[31m[错误]\033[0m $*" >&2; }
 
@@ -111,7 +145,17 @@ log "查询最新版本…"
 if [[ -n "$WANT_VERSION" ]]; then
   TAG="v$WANT_VERSION"
 else
-  TAG="$(curl -fsSL "$API" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+  RESP="$(gh_text "$API" || true)"
+  if [ -z "$RESP" ]; then
+    err "无法访问 GitHub（直连与镜像均失败）"
+    err "解决：① GH_PROXY=https://ghfast.top bash install.sh   ② 手动下载后用 --pkg 指定"
+    exit 1
+  fi
+  if echo "$RESP" | grep -q "Not Found"; then
+    err "该仓库还没有任何 Release 包（GitHub 404），请等发布或用 --pkg 手动指定"
+    exit 1
+  fi
+  TAG="$(echo "$RESP" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
 fi
 [[ -n "$TAG" ]] || { err "无法查询最新版本，请检查网络"; exit 1; }
 VER="${TAG#v}"
@@ -130,9 +174,15 @@ chmod 700 "$DATA_DIR" 2>/dev/null || true
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 log "下载 $ASSET …"
-curl -fL --progress-bar -o "$TMP/pkg.tar.gz" "$URL" || { err "下载失败：$URL"; exit 1; }
+if [ -n "${LOCAL_PKG:-}" ]; then
+  log "使用本地安装包：$LOCAL_PKG"
+  cp "$LOCAL_PKG" "$TMP/pkg.tar.gz" || { err "无法读取本地包"; exit 1; }
+else
+  gh_fetch "$URL" "$TMP/pkg.tar.gz" 600 || { err "下载失败：$URL"
+    err "可手动下载后用：bash install.sh --pkg /path/to/$ASSET"; exit 1; }
+fi
 
-if curl -fsSL -o "$TMP/pkg.sha256" "$SHA_URL" 2>/dev/null; then
+if gh_fetch "$SHA_URL" "$TMP/pkg.sha256" 20 2>/dev/null; then
   EXPECT="$(awk '{print $1}' "$TMP/pkg.sha256")"
   ACTUAL="$(sha256sum "$TMP/pkg.tar.gz" | awk '{print $1}')"
   if [[ "$EXPECT" != "$ACTUAL" ]]; then

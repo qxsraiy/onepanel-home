@@ -20,6 +20,28 @@ MODE="interactive"
 [[ "${1:-}" == "--check" ]] && MODE="check"
 [[ "${1:-}" == "--rollback" ]] && MODE="rollback"
 
+# GitHub 加速镜像（国内直连经常超时）
+MIRRORS=()
+if [ -n "${GH_PROXY:-}" ]; then MIRRORS+=("${GH_PROXY%/}/"); fi
+MIRRORS+=("" "https://ghfast.top/" "https://gh-proxy.com/" "https://ghproxy.net/")
+gh_fetch() {
+  local url="$1" out="$2" tmo="${3:-60}" m
+  for m in "${MIRRORS[@]}"; do
+    if curl -fsSL --connect-timeout 10 --max-time "$tmo" -o "$out" "${m}${url}" 2>/dev/null; then
+      [ -n "$m" ] && log "镜像：$m"
+      return 0
+    fi
+  done
+  return 1
+}
+gh_text() {
+  local url="$1" m r
+  for m in "${MIRRORS[@]}"; do
+    r="$(curl -fsSL --connect-timeout 10 --max-time 25 "${m}${url}" 2>/dev/null)" && { echo "$r"; return 0; }
+  done
+  return 1
+}
+
 log()  { echo -e "\033[36m[upgrade]\033[0m $*"; }
 warn() { echo -e "\033[33m[警告]\033[0m $*"; }
 err()  { echo -e "\033[31m[错误]\033[0m $*" >&2; }
@@ -55,8 +77,7 @@ esac
 CUR_VER="$(cat "$(readlink "$CURRENT_LINK")/.version" 2>/dev/null || echo '0.0.0')"
 log "当前版本：$CUR_VER"
 
-TAG="$(curl -fsSL --max-time 20 "https://api.github.com/repos/${REPO}/releases/latest" \
-  | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+TAG="$(gh_text "https://api.github.com/repos/${REPO}/releases/latest" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
 [[ -n "$TAG" ]] || { err "无法查询 GitHub（网络问题？可手动下载）"; exit 1; }
 NEW_VER="${TAG#v}"
 log "最新版本：$NEW_VER"
@@ -74,8 +95,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 log "下载 $ASSET …"
-curl -fL --max-time 300 -o "$TMP/pkg.tar.gz" "$URL" || { err "下载失败"; exit 1; }
-if curl -fsSL --max-time 20 -o "$TMP/pkg.sha256" "${URL}.sha256" 2>/dev/null; then
+gh_fetch "$URL" "$TMP/pkg.tar.gz" 600 || { err "下载失败（可设 GH_PROXY=https://ghfast.top 重试）"; exit 1; }
+if gh_fetch "${URL}.sha256" "$TMP/pkg.sha256" 20 2>/dev/null; then
   EXP="$(awk '{print $1}' "$TMP/pkg.sha256")"
   ACT="$(sha256sum "$TMP/pkg.tar.gz" | awk '{print $1}')"
   [[ "$EXP" == "$ACT" ]] || { err "sha256 校验失败"; exit 1; }
