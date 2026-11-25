@@ -1,0 +1,198 @@
+// backend/prisma/schema.prisma
+
+generator client {
+  provider   = "prisma-client-js"
+  // library 模式：查询引擎以 N-API 动态库加载，不再 spawn 子进程
+  // （既省一个常驻进程，也避免受限环境下 spawn EPERM）
+  engineType = "library"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Item {
+  id          Int      @id @default(autoincrement())
+
+  // ====== v3.0.0 多节点同步 + 整行加密 ======
+  uid         String   @unique              // UUIDv7，跨节点唯一主键
+  payload     String   @default("")         // AES-256-GCM(JSON 全部业务字段)
+  hlc         String   @default("")         // 版本号：物理毫秒:逻辑计数:节点ID
+  nodeId      String   @default("")         // 最后一次修改来自哪个节点
+  deletedAt   DateTime?                     // 墓碑（删除也参与同步）
+  dirty       Boolean  @default(true)       // 本地有未广播的变更
+  updatedAt   DateTime @updatedAt
+
+  type        String   @default("bookmark")
+  name        String
+  description String?
+  icon        String?
+  openMethod  String   @default("new_tab")
+
+  bgColor     String?
+  bgOpacity   Float?
+  group       String   @default("书签")
+  order       Int      @default(0)
+  gridX       Int?
+  gridY       Int?
+
+  // ====== 卡片备忘录（v2.6.0）：JSON 字符串 ======
+  // { note: '注意事项', entries: [{ label, value, masked }], updatedAt }
+  memo         String?
+
+  // ====== 桌面小组件（v2.4.0） ======
+  widgetType   String? // null=普通卡片；'system'=系统状态；'clock'=时钟
+  widgetConfig String? // 小组件参数（JSON 字符串，预留）
+
+  // ====== 卡片状态标记（v2.2.0） ======
+  isHidden    Boolean  @default(false) // 隐藏卡：默认不上首页，仅"显示隐藏卡"或排序模式下可见
+  isPinned    Boolean  @default(false) // 置顶卡：所属分组内排在最前
+
+  // ====== 状态监测字段 ======
+  isMonitored Boolean  @default(false)
+  pingUrl     String?
+
+  urls        ItemUrl[]
+  createdAt   DateTime @default(now())
+
+  @@index([group])
+  @@index([isMonitored])
+}
+
+model ItemUrl {
+  id       Int    @id @default(autoincrement())
+  itemId   Int
+  item     Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  url      String
+  label    String @default("主地址")
+  priority Int    @default(0)
+
+  @@index([itemId])
+}
+
+model AppConfig {
+  id               Int     @id @default(1)
+  username         String  @default("admin")
+  password         String
+  isFirstLogin     Boolean @default(true)
+
+  // ====== WebDAV 云备份 ======
+  webdavUrl        String?
+  webdavUser       String?
+  webdavPass       String?
+
+  // ====== 企业微信推送 ======
+  wechatCorpId     String?
+  wechatCorpSecret String?
+  wechatAgentId    String?
+  wechatTouser     String? @default("@all")
+
+  // ====== 外观与主题 ======
+  themeBg          String?
+  themeColor       String?
+  siteIcon         String?
+  bgImage          String?
+  siteTitle        String?
+  footerText       String?
+  groups           String?  // JSON 字符串数组
+  cardBgColor      String?
+  cardBgOpacity    Float?
+
+  // ====== 口令保险库（v2.10.0）：主密钥被管理员密码包裹后存这两列 ======
+  vaultSalt        String?
+  vaultWrapped     String?
+
+  // ====== 双因子认证 ======
+  twoFactorSecret  String?
+  twoFactorEnabled Boolean @default(false)
+}
+
+// ====== v3.0.0 节点同步 ======
+
+/// 节点本地状态（键值：nodeId / urls / hlc / seq ...）
+model NodeState {
+  key   String @id
+  value String
+}
+
+/// 变更日志：每条本地写操作留痕，供其他节点拉取
+model ChangeLog {
+  nodeId    String
+  seq       Int
+  changeId  String   @unique
+  entity    String
+  uid       String
+  op        String
+  hlc       String
+  payload   String?
+  sig       String?
+  pk        String?  // 源节点公钥（留档，便于审计；不再用于自动入表）
+  createdAt DateTime @default(now())
+
+  @@id([nodeId, seq])
+  @@index([hlc])
+  @@index([entity, uid])
+  @@index([createdAt]) // 清理任务按时间扫描
+}
+
+/// 已应用的变更（幂等去重）
+model AppliedChange {
+  changeId  String   @id
+  appliedAt DateTime @default(now())
+}
+
+/// 对端同步进度（两个方向分开记，避免互相污染）
+model PeerAck {
+  peerId    String   @id
+  lastSeq   Int      @default(0) // 我已推给对方到第几条（我的 seq）
+  pulledSeq Int      @default(0) // 我已从对方收到第几条（对方的 seq）
+  updatedAt DateTime @updatedAt
+}
+
+/// 成员表（随同步传播）
+model Member {
+  nodeId     String    @id
+  publicKey  String
+  name       String?   @default("") /// 设备名（拓扑图/成员列表显示）
+  selfUrls   String?
+  role       String    @default("peer")
+  status     String    @default("active")
+  lastSeen   DateTime?
+  lastSyncAt DateTime?
+  addedAt    DateTime  @default(now())
+}
+
+/// 云端已有内容（增量备份去重）
+model RemoteBlob {
+  hash       String   @id
+  size       Int      @default(0)
+  uploadedBy String?
+  kind       String   @default("item")
+  uploadedAt DateTime @default(now())
+}
+
+/// 冲突留档（LWW 输掉的版本，可回滚）
+model ItemRevision {
+  id        Int      @id @default(autoincrement())
+  uid       String
+  payload   String
+  hlc       String
+  nodeId    String
+  reason    String   @default("conflict")
+  createdAt DateTime @default(now())
+
+  @@index([uid])
+}
+
+/// 站点存活历史（v3.1.1）：只保留 30 天，用于画可用性条形图
+model PingHistory {
+  id        Int      @id @default(autoincrement())
+  uid       String
+  ok        Boolean
+  latencyMs Int?
+  checkedAt DateTime @default(now())
+
+  @@index([uid, checkedAt])
+  @@index([checkedAt])
+}

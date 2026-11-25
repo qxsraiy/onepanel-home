@@ -47,24 +47,54 @@ command -v tar  >/dev/null || { err "需要 tar"; exit 1; }
 
 ARCH="$(uname -m)"
 case "$ARCH" in
-  x86_64|amd64) ARCH_TAG="linux-x64" ;;
-  aarch64|arm64) ARCH_TAG="linux-arm64" ;;
-  *) err "不支持的架构：$ARCH（支持 x86_64 / aarch64）"; exit 1 ;;
+  x86_64|amd64|x64)          ARCH_TAG="linux-x64" ;;
+  aarch64|arm64|armv8l|armv8b) ARCH_TAG="linux-arm64" ;;
+  armv7l|armv6l|armhf)
+    err "检测到 32 位 ARM（$ARCH），官方只提供 x64 / arm64 包。"
+    err "请改用 Docker 部署：docker compose up -d"
+    exit 1 ;;
+  *) err "无法识别的架构：$ARCH"; exit 1 ;;
 esac
-log "架构：$ARCH_TAG"
+log "架构：$ARCH（匹配 $ARCH_TAG）"
+
+# libc 检测：Alpine(musl) 上官方 Node 二进制跑不起来
+LIBC="glibc"
+if ldd --version 2>&1 | grep -qi musl; then LIBC="musl"; fi
+if [[ "$LIBC" == "musl" ]]; then
+  err "检测到 musl libc（Alpine？）。官方 Node 二进制需要 glibc。"
+  err "Alpine 请用 Docker 部署：docker compose up -d"
+  exit 1
+fi
+
+# ---------- 2. Node 运行时 ----------
+NODE_WANT="22.15.1"
+RUNTIME_DIR="${INSTALL_DIR}/runtime"
+mkdir -p "$RUNTIME_DIR"
 
 NODE_BIN="$(command -v node || true)"
-if [[ -z "$NODE_BIN" ]]; then
-  NODE_MAJOR=0
-else
+NODE_OK=0
+if [[ -n "$NODE_BIN" ]]; then
   NODE_MAJOR="$($NODE_BIN -v | sed 's/v//' | cut -d. -f1)"
+  [[ "$NODE_MAJOR" -ge 18 ]] && NODE_OK=1
 fi
-if [[ "$NODE_MAJOR" -lt 18 ]]; then
-  log "未检测到 Node 18+，将使用安装包内自带的 Node 运行时"
-  USE_BUNDLED_NODE=1
+
+if [[ "$NODE_OK" -eq 1 ]]; then
+  log "使用系统 Node：$(node -v)"
+  export PATH="$(dirname "$NODE_BIN"):$PATH"
 else
-  log "检测到 Node $(node -v)"
-  USE_BUNDLED_NODE=0
+  log "系统没有 Node 18+，自动下载官方 Node $NODE_WANT（$ARCH_TAG）…"
+  NODE_TARBALL="node-v${NODE_WANT}-${ARCH_TAG}.tar.xz"
+  NODE_URL="https://nodejs.org/dist/v${NODE_WANT}/${NODE_TARBALL}"
+  if ! curl -fL --max-time 300 -o "$RUNTIME_DIR/node.tar.xz" "$NODE_URL"; then
+    err "下载 Node 失败：$NODE_URL"
+    err "也可以自己先装 Node 18+ 后重跑本脚本，或用 Docker 部署"
+    exit 1
+  fi
+  tar -xJf "$RUNTIME_DIR/node.tar.xz" -C "$RUNTIME_DIR"
+  mv "$RUNTIME_DIR/node-v${NODE_WANT}-${ARCH_TAG}" "$RUNTIME_DIR/node" 2>/dev/null || true
+  rm -f "$RUNTIME_DIR/node.tar.xz"
+  export PATH="$RUNTIME_DIR/node/bin:$PATH"
+  log "已内置 Node：$($RUNTIME_DIR/node/bin/node -v)"
 fi
 
 # ---------- 2. 端口检查 ----------

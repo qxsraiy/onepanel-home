@@ -16,6 +16,15 @@ fi
 export PORT OP_DATA_DIR
 export DATABASE_URL="${DATABASE_URL:-file:${OP_DATA_DIR}/onepanel.db}"
 
+# 优先用内置运行时（install.sh 下载的），回退到系统 Node
+RUNTIME_NODE="${ONEPANEL_DIR:-/opt/onepanel}/runtime/node/bin/node"
+if [[ -x "$RUNTIME_NODE" ]]; then
+  NODE_BIN="$RUNTIME_NODE"
+else
+  NODE_BIN="$(command -v node || true)"
+  [[ -n "$NODE_BIN" ]] || { echo "[onepanel] 找不到 node，请重跑 install.sh" >&2; exit 1; }
+fi
+
 mkdir -p "$OP_DATA_DIR"
 cd "$HERE/backend"
-exec node index.js
+exec "$NODE_BIN" index.js

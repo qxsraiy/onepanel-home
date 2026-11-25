@@ -1,0 +1,43 @@
+{
+  "name": "onepanel-backend",
+  "version": "3.11.0",
+  "description": "OnePanel 个人数字枢纽后端（Express + Prisma/SQLite）",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "db:push": "prisma db push",
+    "db:generate": "prisma generate",
+    "reset": "node reset.js"
+  },
+  "keywords": [
+    "dashboard",
+    "navigation",
+    "self-hosted"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "@simplewebauthn/server": "^14.1.0",
+    "axios": "^1.16.1",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "jszip": "^3.10.2",
+    "ping": "^1.0.0",
+    "qrcode": "^1.5.4",
+    "speakeasy": "^2.0.0",
+    "webdav": "^5.10.0"
+  },
+  "devDependencies": {
+    "prisma": "^6.19.3"
+  }
+}

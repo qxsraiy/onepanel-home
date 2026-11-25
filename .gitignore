@@ -1,5 +1,20 @@
+# 依赖
 node_modules/
+**/node_modules/
+
+# 构建产物
+dist/
+**/dist/
+backend/public/
+
+# 运行时数据
 *.db
-*.log
+*.db-journal
 data/
 backups/
+logs/
+*.log
+
+# 环境配置
+.env
+onepanel.env
