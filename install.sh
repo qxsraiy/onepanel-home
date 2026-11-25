@@ -26,6 +26,7 @@ AUTO_UPDATE=0
 USE_SYSTEMD=1
 WANT_VERSION=""
 LOCAL_PKG=""
+PKG_URL=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -36,6 +37,7 @@ while [[ $# -gt 0 ]]; do
     --no-systemd) USE_SYSTEMD=0; shift ;;
     --version) WANT_VERSION="$2"; shift 2 ;;
     --pkg) LOCAL_PKG="$2"; shift 2 ;;
+    --url) PKG_URL="$2"; shift 2 ;;
     *) echo "未知参数: $1"; exit 1 ;;
   esac
 done
@@ -173,10 +175,24 @@ chmod 700 "$DATA_DIR" 2>/dev/null || true
 # ---------- 5. 下载 + 校验 ----------
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+echo ""
+echo "  安装包直链（可复制到浏览器 / IDM / 迅雷下载）："
+echo "  $URL"
+echo ""
+if [ -z "${LOCAL_PKG:-}" ] && [ -z "${PKG_URL:-}" ]; then
+  echo "  ⚠️  国内直连 GitHub Release 下载 86MB 包通常会超时。"
+  echo "     如果下面卡住请 Ctrl+C，用浏览器下载上面的直链后执行："
+  echo "       bash install.sh --pkg /path/to/$ASSET"
+  echo ""
+fi
 log "下载 $ASSET …"
 if [ -n "${LOCAL_PKG:-}" ]; then
   log "使用本地安装包：$LOCAL_PKG"
   cp "$LOCAL_PKG" "$TMP/pkg.tar.gz" || { err "无法读取本地包"; exit 1; }
+elif [ -n "${PKG_URL:-}" ]; then
+  log "从指定地址下载：$PKG_URL"
+  curl -fL --connect-timeout 15 --max-time 1800 -o "$TMP/pkg.tar.gz" "$PKG_URL" || {
+    err "指定地址下载失败：$PKG_URL"; exit 1; }
 else
   gh_fetch "$URL" "$TMP/pkg.tar.gz" 600 || { err "下载失败：$URL"
     err "可手动下载后用：bash install.sh --pkg /path/to/$ASSET"; exit 1; }
