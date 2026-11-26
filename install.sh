@@ -23,6 +23,7 @@ PORT=5266
 INSTALL_DIR="/opt/onepanel"
 DATA_DIR="/var/lib/onepanel"
 AUTO_UPDATE=0
+AUTO_UPDATE_HOUR=4
 USE_SYSTEMD=1
 WANT_VERSION=""
 LOCAL_PKG=""
@@ -82,6 +83,85 @@ err() { echo -e "\033[31m[错误]\033[0m $*" >&2; }
 # ======================================================================
 is_tty() { [ -t 0 ] && [ -t 1 ]; }
 
+# ---------- 安装向导：逐项询问 ----------
+port_in_use() {
+  (command -v ss >/dev/null && ss -ltn 2>/dev/null | grep -q ":$1 ") || \
+  (command -v netstat >/dev/null && netstat -ltn 2>/dev/null | grep -q ":$1 ")
+}
+
+ask_install_options() {
+  echo ""
+  echo "  ── 安装配置（直接回车 = 用 [ ] 里的默认值）──"
+  echo ""
+
+  # ① 端口
+  printf "  ① 服务端口 [%s]: " "$PORT"
+  read -r _p
+  if [ -n "$_p" ]; then
+    case "$_p" in (*[!0-9]*)
+      err "端口必须是数字"; return 1 ;;
+    esac
+    PORT="$_p"
+  fi
+  if port_in_use "$PORT"; then
+    echo "     ⚠️  端口 $PORT 已被占用"
+    printf "     是否改用 %s？[Y/n]: " "$((PORT+1))"
+    read -r _y
+    case "$_y" in n|N) echo "     保持 $PORT（可能启动失败）" ;; *) PORT=$((PORT+1)) ;; esac
+  fi
+
+  # ② 安装目录
+  printf "  ② 安装目录 [%s]: " "$INSTALL_DIR"
+  read -r _d
+  [ -n "$_d" ] && INSTALL_DIR="$_d"
+
+  # ③ 数据目录
+  printf "  ③ 数据目录（升级不影响）[%s]: " "$DATA_DIR"
+  read -r _dt
+  [ -n "$_dt" ] && DATA_DIR="$_dt"
+
+  # ④ systemd
+  printf "  ④ 注册为系统服务 systemd？[Y/n]: "
+  read -r _sd
+  case "$_sd" in n|N) USE_SYSTEMD=0 ;; *) USE_SYSTEMD=1 ;; esac
+
+  # ⑤ 自动更新
+  printf "  ⑤ 开启每日自动检查更新？[y/N]: "
+  read -r _au
+  case "$_au" in y|Y)
+    AUTO_UPDATE=1
+    printf "     每天几点执行？[默认 4]: "
+    read -r _h
+    AUTO_UPDATE_HOUR="${_h:-4}"
+    case "$AUTO_UPDATE_HOUR" in (*[!0-9]*) AUTO_UPDATE_HOUR=4 ;; esac
+    ;;
+  *) AUTO_UPDATE=0 ;;
+  esac
+
+  # ⑥ 指定版本
+  printf "  ⑥ 安装指定版本（留空 = 最新）: "
+  read -r _v
+  [ -n "$_v" ] && WANT_VERSION="${_v#v}"
+
+  # 汇总确认
+  echo ""
+  echo "  ── 即将安装 ──"
+  echo "     端口：$PORT"
+  echo "     安装目录：$INSTALL_DIR"
+  echo "     数据目录：$DATA_DIR"
+  echo "     systemd：$([ "$USE_SYSTEMD" -eq 1 ] && echo 是 || echo 否)"
+  if [ "$AUTO_UPDATE" -eq 1 ]; then
+    echo "     自动更新：是（每天 ${AUTO_UPDATE_HOUR}:00）"
+  else
+    echo "     自动更新：否"
+  fi
+  if [ -n "$WANT_VERSION" ]; then echo "     版本：v$WANT_VERSION"; else echo "     版本：最新"; fi
+  echo ""
+  printf "  确认开始安装？[Y/n]: "
+  read -r _ok
+  case "$_ok" in n|N) echo "  已取消"; return 1 ;; esac
+  return 0
+}
 show_menu() {
   echo ""
   echo "╔══════════════════════════════════════════════╗"
@@ -218,7 +298,7 @@ run_menu() {
     printf "  请选择 [0-8]: "
     read -r choice
     case "$choice" in
-      1) echo "  → 进入安装流程"; return 0 ;;
+      1) if ask_install_options; then return 0; fi ;;
       2) do_uninstall; echo ""; read -r -p "  按回车继续…" _ ;;
       3) do_change_port; echo ""; read -r -p "  按回车继续…" _ ;;
       4) do_status; echo ""; read -r -p "  按回车继续…" _ ;;
