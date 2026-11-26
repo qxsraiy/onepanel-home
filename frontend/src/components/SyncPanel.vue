@@ -95,7 +95,7 @@ async function loadAccount() {
 }
 
 // 三个区块的折叠状态
-const showInviteBlock = ref(true)
+const showInviteBlock = ref(false)
 const showNetConfigBlock = ref(false)
 
 const selfUrlHint = computed(() => {

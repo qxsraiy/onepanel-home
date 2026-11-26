@@ -2138,11 +2138,22 @@ app.get('/api/passkey/register/options', authenticateToken, ah(async (req, res) 
   const options = await generateRegistrationOptions({
     rpName: RP_NAME,
     rpID: rpIdFor(req),
-    userID: Buffer.from('onepanel-admin'),
+    /**
+     * 【v3.26.0 修复】userID 原来写死 Buffer.from('onepanel-admin')。
+     * 认证器（Touch ID / Windows Hello / 密码管理器）会按 user.id 去重，
+     * 一旦本机存过同 id 的凭据、而服务端数据库又是空的（重装/清库），
+     * 再次注册就会报：
+     *   "attempted to register an authenticator that contains one of the
+     *    credentials already registered with the relying party"
+     * 改成每次随机 → 认证器认为是新用户，允许注册；
+     * 服务端按 credentialId 存，不依赖 userID 稳定。
+     */
+    userID: require('crypto').randomBytes(16),
     userName: (await prisma.appConfig.findUnique({ where: { id: 1 } }))?.username || 'admin',
     userDisplayName: 'OnePanel 管理员',
     attestationType: 'none',
-    excludeCredentials: (rows || []).map((r) => ({ id: String(r.credentialId) })),
+    // 空列表就不要传这个字段（部分浏览器对空数组处理不一致）
+    ...((rows || []).length ? { excludeCredentials: rows.map((r) => ({ id: String(r.credentialId) })) } : {}),
     authenticatorSelection: { residentKey: 'preferred', userVerification: 'preferred' },
     // 【PRF】请求 PRF 扩展：注册时若能拿到 prf.results.first，就能用它包住主密钥，
     // 以后指纹一按同时完成"登录 + 解锁保险库"。Chromium 系（Chrome/Edge）已支持。

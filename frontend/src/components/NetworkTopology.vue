@@ -192,7 +192,7 @@ const orbit = computed(() => radius.value);
         <div v-if="hoverInfo.lastSync" class="tt-sync">{{ hoverInfo.lastSync }}</div>
       </template>
     </div>
-    <div v-if="!hoverInfo" class="topo-idle">悬停节点查看状态</div>
+    <div class="topo-idle">悬停节点查看状态</div>
 
     <!-- ⑧ 图例收进角落 -->
     <div class="topo-legend">
@@ -251,7 +251,7 @@ const orbit = computed(() => radius.value);
 /* 【v3.25.0】浮条绝对定位：出现/消失都不推挤拓扑图，节点位置永远不动 */
 .topo-wrap { position: relative; }
 .topo-tip {
-  position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
+  position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
   min-width: 200px; max-width: 92%; padding: 9px 12px; border-radius: 10px;
   background: color-mix(in srgb, var(--theme-bg, #0f172a) 90%, transparent);
   border: 1px solid color-mix(in srgb, var(--theme-color) 14%, transparent);
@@ -260,12 +260,14 @@ const orbit = computed(() => radius.value);
   font-size: 11.5px; line-height: 1.6; text-align: left;
   color: var(--theme-color);
   opacity: 0; pointer-events: none; z-index: 20;
-  transition: opacity .14s ease;
+  /* 不做渐变：悬停时即时出现，避免文字"忽隐忽现" */
+  visibility: hidden;
 }
-.topo-tip.show { opacity: 1; }
+.topo-tip.show { opacity: 1; visibility: visible; }
 /* 未悬停时的提示语（很小，占原来那一行的高度） */
+/* 固定高度 + 固定文案，图例和拓扑位置永远不动 */
 .topo-idle { margin-top: 4px; text-align: center; font-size: 10.5px;
-  color: var(--theme-color); opacity: .42; min-height: 15px; }
+  color: var(--theme-color); opacity: .42; height: 15px; line-height: 15px; }
 
 .topo-legend { display: flex; gap: 12px; justify-content: center; font-size: 10px; opacity: .45; padding-bottom: 2px; }
 .topo-legend .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 3px; vertical-align: middle; }
