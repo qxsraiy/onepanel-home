@@ -88,6 +88,17 @@ async function loadNodeStats() {
 /** 按 nodeId 找状态：本机返回 self，其他在 nodes 里找 */
 /** nodeId -> 状态对象（给拓扑图用） */
 /** 提示用户填什么地址（优先用当前访问地址） */
+// 当前登录账号（邀请时显示，避免用户记错）
+const currentUsername = ref('')
+async function loadAccount() {
+  try { const { data } = await axios.get('/api/config/account'); currentUsername.value = data.username || '' } catch { /* 忽略 */ }
+}
+
+// 三个区块的折叠状态
+const showInviteBlock = ref(true)
+const showNetConfigBlock = ref(false)
+const showTopoBlock = ref(false)
+
 const selfUrlHint = computed(() => {
   if (typeof window === 'undefined') return 'https://你的域名'
   return window.location.origin
@@ -325,28 +336,30 @@ onMounted(load);
   <div class="sync-pane">
     <!-- ===== 邀请新设备（账号密码 + 人工批准）===== -->
     <div class="setting-block">
-      <h4><AppIcon icon="mdi:account-multiple-plus-outline" /> 邀请新设备加入</h4>
-      <p class="tip">
-        新设备装好后打开它的面板，选<b>「用账号密码加入」</b>，填下面这两样：
-      </p>
-      <div class="invite-guide">
-        <div class="ig-row">
-          <span class="ig-label">节点地址</span>
-          <code class="ig-val">{{ selfUrlHint }}</code>
+      <button class="fold-head" @click="showInviteBlock = !showInviteBlock">
+        <AppIcon icon="mdi:account-multiple-plus-outline" />
+        <span>邀请新设备加入</span>
+        <AppIcon :icon="showInviteBlock ? 'mdi:chevron-up' : 'mdi:chevron-down'" class="fold-arrow" />
+      </button>
+      <div v-if="showInviteBlock" class="fold-body">
+        <div class="invite-guide">
+          <div class="ig-row">
+            <span class="ig-label">节点地址</span>
+            <code class="ig-val">{{ selfUrlHint }}</code>
+          </div>
+          <div class="ig-row">
+            <span class="ig-label">管理员账号</span>
+            <code class="ig-val">{{ status?.username || currentUsername }}</code>
+          </div>
+          <div class="ig-row">
+            <span class="ig-label">管理员密码</span>
+            <code class="ig-val">你自己的登录密码</code>
+          </div>
         </div>
-        <div class="ig-row">
-          <span class="ig-label">管理员账号</span>
-          <code class="ig-val">admin</code>
-        </div>
-        <div class="ig-row">
-          <span class="ig-label">管理员密码</span>
-          <code class="ig-val">你自己的登录密码</code>
-        </div>
+        <p class="tip" style="margin-top:10px">
+          新设备提交后会出现在这页的<b>「待批准的入网请求」</b>里，你点批准才会真正加入（5 分钟内有效）。
+        </p>
       </div>
-      <p class="tip" style="margin-top:10px">
-        新设备提交后会出现在这页的<b>「待批准的入网请求」</b>里，你点<b>批准</b>才会真正加入（5 分钟内有效）。
-        这样即使密码泄露，别人也进不来。
-      </p>
     </div>
 
     <!-- ===== 待批准的入网请求 ===== -->
@@ -370,7 +383,12 @@ onMounted(load);
 
     <!-- ===== 网络域名配置（可直接在界面编辑）===== -->
     <div v-if="netConfig" class="setting-block" :class="{ 'cfg-warn': !netConfig.cookieDomain }">
-      <h4><AppIcon icon="mdi:earth" /> 网络域名配置</h4>
+      <button class="fold-head" @click="showNetConfigBlock = !showNetConfigBlock">
+        <AppIcon icon="mdi:earth" />
+        <span>网络域名配置</span>
+        <AppIcon :icon="showNetConfigBlock ? 'mdi:chevron-up' : 'mdi:chevron-down'" class="fold-arrow" />
+      </button>
+      <div v-if="showNetConfigBlock" class="fold-body">
 
       <!-- 展示态 -->
       <template v-if="!netEditing">
@@ -414,17 +432,23 @@ onMounted(load);
         </div>
       </template>
     </div>
+      </div>
     <!-- ===== 网络拓扑 ===== -->
     <div class="setting-block">
-      <h4><AppIcon icon="mdi:lan-connect" /> 网络拓扑</h4>
-      <NetworkTopology
-        :node-id="status?.nodeId || ''"
-        :node-name="status?.nodeName || ''"
-        :members="otherMembers"
-        :stats="nodeStatsMap"
-        @pick="highlightMember"
-      />
-      <p class="tip">点节点可在下面列表里定位；悬停显示地址与最后同步时间。</p>
+      <button class="fold-head" @click="showTopoBlock = !showTopoBlock">
+        <AppIcon icon="mdi:lan-connect" />
+        <span>网络拓扑</span>
+        <AppIcon :icon="showTopoBlock ? 'mdi:chevron-up' : 'mdi:chevron-down'" class="fold-arrow" />
+      </button>
+      <div v-if="showTopoBlock" class="fold-body">
+        <NetworkTopology
+          :node-id="status?.nodeId || ''"
+          :node-name="status?.nodeName || ''"
+          :members="otherMembers"
+          :stats="nodeStatsMap"
+          @pick="highlightMember"
+        />
+      </div>
     </div>
 
     <!-- ===== 折叠：已加入的设备 ===== -->
@@ -453,26 +477,15 @@ onMounted(load);
         </div>
 
         <div class="member-list" style="margin-bottom:10px">
-          <div class="member-row self-row" @mouseenter="hoverNodeId = status?.nodeId || ''" @mouseleave="hoverNodeId = ''">
+          <div class="member-row self-row">
             <span class="dot active"></span>
             <code class="member-id">{{ status?.nodeName || '本机' }}</code>
             <span class="member-url">本地节点（你自己）</span>
             <span class="member-time">{{ fmtTime(status?.lastSyncAt) }}</span>
-            <div v-if="hoverNodeId === (status?.nodeId || '')" class="node-tip">
-              <div class="nt-head">
-                <span class="nt-name">{{ status?.nodeName || '本机' }}</span>
-                <span class="nt-badge on">在线</span>
-              </div>
-              <div class="nt-row"><span>版本</span><b>v{{ statsFor(status?.nodeId)?.version || '—' }}</b></div>
-              <div class="nt-row"><span>CPU</span><b>{{ statsFor(status?.nodeId)?.cpu?.usage ?? '—' }}%（{{ statsFor(status?.nodeId)?.cpu?.cores }} 核）</b></div>
-              <div class="nt-row"><span>内存</span><b>{{ fmtMem(statsFor(status?.nodeId)?.mem) }}</b></div>
-              <div class="nt-row"><span>磁盘</span><b>{{ fmtDisk(statsFor(status?.nodeId)?.disk) }}</b></div>
-              <div class="nt-row"><span>已运行</span><b>{{ fmtUptime(statsFor(status?.nodeId)?.uptimeSec) }}</b></div>
-            </div>
-          </div>
+                      </div>
         </div>
 
-        <div v-if="!otherMembers.length" class="tip">还没有其他设备。用上面的二维码或授权码邀请一台。</div>
+        <div v-if="!otherMembers.length" class="tip">还没有其他设备。用上面的「邀请新设备加入」把另一台接进来。</div>
         <div v-else class="member-list">
           <div
             v-for="m in otherMembers" :key="m.nodeId"
@@ -549,23 +562,6 @@ onMounted(load);
 .sync-pane { padding: 2px; }
 .member-row { position: relative; }
 .self-row { opacity: .72; }
-.node-tip {
-  position: absolute; left: 38px; top: calc(100% + 4px); z-index: 30;
-  min-width: 230px; padding: 10px 12px; border-radius: 11px;
-  background: color-mix(in srgb, var(--theme-bg, #0f172a) 88%, transparent);
-  border: 1px solid color-mix(in srgb, var(--theme-color) 16%, transparent);
-  backdrop-filter: blur(14px);
-  box-shadow: 0 14px 34px -8px rgba(0,0,0,.6);
-  font-size: 11.5px; line-height: 1.7; pointer-events: none;
-}
-.nt-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.nt-name { font-weight: 600; font-size: 12px; }
-.nt-badge { font-size: 9.5px; padding: 1px 6px; border-radius: 999px; }
-.nt-badge.on { background: color-mix(in srgb, #10b981 22%, transparent); color: #10b981; }
-.nt-badge.off { background: color-mix(in srgb, #f87171 22%, transparent); color: #f87171; }
-.nt-row { display: flex; gap: 10px; }
-.nt-row span { width: 62px; opacity: .5; flex-shrink: 0; }
-.nt-row b { font-weight: 500; }
 .cfg-edit { display: flex; flex-direction: column; gap: 4px; }
 .cfg-edit label { font-size: 11.5px; opacity: .55; margin: 8px 0 3px; }
 .cfg-edit .cfg-check { display: flex; align-items: center; gap: 8px; font-size: 12px; opacity: .8; margin-top: 10px; cursor: pointer; }
