@@ -571,18 +571,10 @@ const handleCloseCheck = async () => {
                 <div class="flex-1"><label>全局背景色</label><input v-model="localSettings.themeBg" type="color" class="color-picker" /></div>
                 <div class="flex-1"><label>全局文字颜色</label><input v-model="localSettings.themeColor" type="color" class="color-picker" /></div>
               </div>
-              <div class="form-group mt-3">
-                <label>主题强调色（按钮、选中态、卡片光晕）</label>
-                <div class="accent-row">
-                  <button
-                    v-for="c in ACCENTS" :key="c.value"
-                    class="accent-dot"
-                    :class="{ active: (localSettings.themeAccent || '#3b82f6') === c.value }"
-                    :style="{ background: c.value }"
-                    :title="c.name"
-                    @click="localSettings.themeAccent = c.value"
-                  ></button>
-                  <input v-model="localSettings.themeAccent" type="color" class="accent-picker" title="自定义强调色" />
+              <div class="form-row mt-3">
+                <div class="flex-1">
+                  <label>主题强调色（按钮、选中态、卡片光晕）</label>
+                  <input v-model="localSettings.themeAccent" type="color" class="color-picker" />
                 </div>
               </div>
               <div class="action-row mt-3" style="flex-wrap: wrap;">
@@ -965,14 +957,6 @@ const handleCloseCheck = async () => {
 }
 .glass-input:focus { border-color: #3b82f6; }
 
-.accent-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.accent-dot {
-  width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
-  border: 2px solid transparent; transition: transform .14s ease, border-color .14s ease;
-}
-.accent-dot:hover { transform: scale(1.12); }
-.accent-dot.active { border-color: var(--theme-color); box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-bg) 80%, transparent) inset; }
-.accent-picker { width: 34px; height: 26px; border: none; border-radius: 8px; cursor: pointer; background: none; padding: 0; }
 
 .color-picker { -webkit-appearance: none; border: none; width: 100%; height: 40px; border-radius: 8px; cursor: pointer; background: none; }
 .color-picker::-webkit-color-swatch { border: 1px solid color-mix(in srgb, var(--theme-color) 20%, transparent); border-radius: 8px; }
