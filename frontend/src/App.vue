@@ -313,6 +313,12 @@ if (!Array.isArray(savedSettings.groups) || savedSettings.groups.length === 0) {
 }
 const globalSettings = ref({ ...defaultGlobalSettings, ...savedSettings })
 const showSettings = ref(false)
+// 打开设置前先拉一次云端配置，保证「卡片样式预设」等跟着别的节点一致
+async function openSettings(tab) {
+  try { await syncThemeFromCloud() } catch { /* 忽略 */ }
+  showSettings.value = true
+  if (tab) settingsTab.value = tab
+}
 
 const handleSaveSettings = (newSettings, closePanel = true) => {
   globalSettings.value = newSettings
@@ -1609,12 +1615,27 @@ onUnmounted(() => {
             <button class="btn-cancel flex-1" style="padding: 12px" @click="show2FAInputRow = false">返回重输</button>
             <button class="btn-primary flex-1" style="padding: 12px" @click="handleVerify2FA">验证并进入</button>
           </div>
+          <button
+            class="btn-outline full-w mt-2" style="padding: 11px"
+            :disabled="passkeyBusy" @click="handlePasskeyLogin"
+          >
+            {{ passkeyBusy ? '验证中…' : '🔐 改用通行密钥登录' }}
+          </button>
         </div>
 
         <div v-else>
           <input v-model="loginForm.username" type="text" placeholder="账号" class="glass-input full-w mt-3" @keyup.enter="handleLogin" />
           <input v-model="loginForm.password" type="password" placeholder="密码" class="glass-input full-w mt-3" @keyup.enter="handleLogin" />
           <button class="btn-primary full-w mt-4" style="padding: 12px" @click="handleLogin">登 录</button>
+          <button
+            class="btn-outline full-w mt-2" style="padding: 11px"
+            :disabled="passkeyBusy" @click="handlePasskeyLogin"
+          >
+            {{ passkeyBusy ? '验证中…' : '🔐 用通行密钥登录' }}
+          </button>
+          <p class="tip" style="margin-top:8px;font-size:11.5px;opacity:.45;text-align:center">
+            指纹 / Face ID / 安全密钥 —— 不需要密码，也不需要两步验证码
+          </p>
         </div>
 
         <p v-if="setupSkipped && canReenter" class="setup-back">
@@ -1688,7 +1709,7 @@ onUnmounted(() => {
           <button class="icon-btn primary" @click.stop="openAddModal" title="添加应用">
             <AppIcon icon="mdi:plus" />
           </button>
-          <button class="icon-btn" @click.stop="settingsTab = ''; showSettings = true" title="全局设置"><AppIcon icon="mdi:cog" /></button>
+          <button class="icon-btn" @click.stop="openSettings('')" title="全局设置"><AppIcon icon="mdi:cog" /></button>
           <button class="icon-btn" @click.stop="logout" title="退出登录" style="color: #ef4444;"><AppIcon icon="mdi:logout" /></button>
         </div>
       </header>
