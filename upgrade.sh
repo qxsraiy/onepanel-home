@@ -16,9 +16,12 @@ ENV_FILE="${INSTALL_DIR}/onepanel.env"
 KEEP=2
 
 MODE="interactive"
+LOCAL_PKG=""
 [[ "${1:-}" == "--auto" ]] && MODE="auto"
 [[ "${1:-}" == "--check" ]] && MODE="check"
 [[ "${1:-}" == "--rollback" ]] && MODE="rollback"
+# 用本地包升级（国内下载不动时的兜底）：--pkg /path/to/onepanel-X.Y.Z-linux-x64.tar.gz
+if [[ "${1:-}" == "--pkg" && -n "${2:-}" ]]; then LOCAL_PKG="$2"; MODE="local"; fi
 
 # GitHub 加速镜像（国内直连经常超时）
 MIRRORS=()
@@ -64,6 +67,47 @@ if [[ "$MODE" == "rollback" ]]; then
   sleep 6
   curl -fsS "http://127.0.0.1:${PORT}/api/health" >/dev/null && { log "✅ 回滚成功"; exit 0; }
   err "回滚后仍不健康"; exit 1
+fi
+
+# ---------- 本地包模式（--pkg）----------
+if [[ "$MODE" == "local" ]]; then
+  [ -f "$LOCAL_PKG" ] || { err "本地包不存在：$LOCAL_PKG"; exit 1; }
+  log "使用本地包升级：$LOCAL_PKG"
+  NEW_VER="$(basename "$LOCAL_PKG" | sed -E 's/^onepanel-([0-9.]+)-.*/\1/')"
+  [ -n "$NEW_VER" ] || { err "无法解析版本号（文件名应为 onepanel-X.Y.Z-linux-*.tar.gz）"; exit 1; }
+  CUR_VER_LOCAL="$(cat "$(readlink "$CURRENT_LINK")/.version" 2>/dev/null || echo 0.0.0)"
+  log "当前 $CUR_VER_LOCAL -> 目标 $NEW_VER"
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT
+  cp "$LOCAL_PKG" "$TMP/pkg.tar.gz"
+  if [ -f "${LOCAL_PKG}.sha256" ]; then
+    EXP="$(awk '{print $1}' "${LOCAL_PKG}.sha256")"
+    ACT="$(sha256sum "$TMP/pkg.tar.gz" | awk '{print $1}')"
+    [ "$EXP" = "$ACT" ] || { err "sha256 校验失败"; exit 1; }
+    log "校验通过"
+  fi
+  NEW_DIR="${INSTALL_DIR}/versions/${NEW_VER}"
+  rm -rf "$NEW_DIR"; mkdir -p "$NEW_DIR"
+  tar -xzf "$TMP/pkg.tar.gz" -C "$NEW_DIR" --strip-components=1 || { err "解压失败"; exit 1; }
+  echo "$NEW_VER" > "$NEW_DIR/.version"
+  OLD_TARGET="$(readlink "$CURRENT_LINK")"
+  ln -sfn "$NEW_DIR" "$CURRENT_LINK"
+  systemctl restart onepanel 2>/dev/null || warn "非 systemd 环境请手动重启"
+  log "等待健康检查…"
+  for i in $(seq 1 20); do
+    if curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
+      log "✅ 升级成功：$CUR_VER_LOCAL -> $NEW_VER"; exit 0
+    fi
+    sleep 2
+  done
+  err "新版本启动失败，回滚到 $OLD_TARGET"
+  ln -sfn "$OLD_TARGET" "$CURRENT_LINK"
+  systemctl restart onepanel 2>/dev/null || true
+  sleep 5
+  if curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
+    err "已回滚，服务正常"; exit 1
+  fi
+  err "回滚后仍不健康，需人工介入"; exit 2
 fi
 
 # ---------- 查最新 ----------
