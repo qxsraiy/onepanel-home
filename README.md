@@ -4,119 +4,50 @@
 
 **本仓库只放正式版本。** 包含当前版本的源码快照，供 CI 构建发布包。
 
-当前版本：**v3.14.1** · 默认端口 **5266**
+当前版本：**v3.28.3** · 默认端口 **5266**
 
 ---
 
-## 🚀 安装（唯一方式：op.sh）
+## 🚀 快速安装
 
-### 第一步：下载 op.sh
+**不需要区分国内外** —— 脚本会自动探测网络环境，选择最快的源。
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/qxsraiy/onepanel-home/main/op.sh -o /root/op.sh
-```
-
-> **不要用 jsDelivr 的 `@main`**（有 12 小时缓存，会拿到旧版）。
-
-### 下载加速（国内）
-
-脚本内置了镜像：**优先 `down.xtay.cn`**，其次 `ghfast.top` / `gh-proxy.com` / `ghproxy.net`，最后直连 GitHub。
-
-也可以自己指定：
+### 国内（Gitee，秒开）
 
 ```bash
-OP_MIRROR=https://down.xtay.cn bash /root/op.sh
-```
-
-镜像规则是**域名替换**：
-
-```
-https://github.com/qxsraiy/onepanel-home/releases/download/v3.15.1/xxx.tar.gz
-            ↓ github.com 换成 down.xtay.cn
-https://down.xtay.cn/qxsraiy/onepanel-home/releases/download/v3.15.1/xxx.tar.gz
-```
-
-### 第二步：运行
-
-```bash
+curl -fsSL "https://gitee.com/a1225/onepanel-home/raw/main/op.sh?t=$(date +%s)" -o /root/op.sh
 bash /root/op.sh
 ```
 
-会显示菜单：
+> **`?t=$(date +%s)` 必须带** —— Gitee raw 有 10~30 分钟 CDN 缓存，不加参数可能拿到旧版。
 
-```
-╔══════════════════════════════════════════════╗
-║            OnePanel 管理菜单                  ║
-╠══════════════════════════════════════════════╣
-║  1) 安装 / 升级到最新版                       ║
-║  2) 卸载（可选择是否保留数据）                 ║
-║  3) 修改端口                                  ║
-║  4) 查看运行状态                              ║
-║  5) 重启服务                                  ║
-║  6) 查看实时日志                              ║
-║  7) 回滚上一版本                              ║
-║  8) 开启/关闭自动更新                         ║
-║  0) 退出                                      ║
-╚══════════════════════════════════════════════╝
-  请选择 [0-8]:
-```
-
-选 **1**，然后逐项确认：
-
-```
-  ── 安装配置（直接回车 = 用 [ ] 里的默认值）──
-
-  ① 服务端口 [5266]:
-  ② 安装目录 [/opt/onepanel]:
-  ③ 数据目录（升级不影响）[/var/lib/onepanel]:
-  ④ 注册为系统服务 systemd？[Y/n]:
-  ⑤ 开启每日自动检查更新？[y/N]:
-  ⑥ 安装指定版本（留空 = 最新）:
-
-  ── 即将安装 ──
-     端口：5266
-     安装目录：/opt/onepanel
-     数据目录：/var/lib/onepanel
-     systemd：是
-     自动更新：否
-     版本：最新
-
-  确认开始安装？[Y/n]:
-```
-
-装完输出：
-
-```
-✅ 安装完成！
-
-  访问地址：http://<本机IP>:5266
-  默认账号：admin
-  默认密码：123456（首次登录会强制改密）
-```
-
-**op.sh 装了之后不要删** —— 它就是这台机器的管理面板，以后升级/改端口/看日志都靠它。
-
-### 只用参数（不进菜单）
+### 国外（GitHub 直连）
 
 ```bash
-bash /root/op.sh --port 8080 --auto-update          # 指定端口 + 自动更新
-bash /root/op.sh --pkg /root/onepanel-3.14.1-linux-x64.tar.gz   # 用本地包
-bash /root/op.sh --dir /data/onepanel --data /data/onepanel-data
+curl -fsSL https://raw.githubusercontent.com/qxsraiy/onepanel-home/main/op.sh -o /root/op.sh
+bash /root/op.sh
 ```
 
-| 参数 | 说明 | 默认 |
+### 镜像仓库
+
+| 平台 | 地址 | 内容 |
 |---|---|---|
-| `--port N` | 服务端口 | 5266 |
-| `--dir PATH` | 安装目录 | /opt/onepanel |
-| `--data PATH` | 数据目录（升级不动） | /var/lib/onepanel |
-| `--auto-update` | 创建自动更新计划任务 | 关闭 |
-| `--no-systemd` | 不注册 systemd | — |
-| `--version X.Y.Z` | 安装指定版本 | 最新 |
-| `--pkg FILE` | 用本地安装包（国内最稳） | — |
-| `--url URL` | 从指定地址下载包 | — |
+| **GitHub** | https://github.com/qxsraiy/onepanel-home | 全量（x64 + arm64 + 便携包） |
+| **Gitee（国内）** | https://gitee.com/a1225/onepanel-home | 代码 + **x64 包** |
 
----
+### 脚本自动选源
 
+启动时探测网络（4 秒内能否访问 gitee.com），决定优先级：
+
+**国内**：`down.xtay.cn` → `Gitee` → 公共镜像 → GitHub
+
+**海外**：`GitHub` → 公共镜像 → `down.xtay.cn` → Gitee
+
+任意源失败自动试下一个，日志会显示实际用的是哪个：
+
+```
+[onepanel] 下载源：https://gitee.com/a1225/onepanel-home/releases/download/v3.28.3/...
+```
 ## 📦 网络不好 / 包下载不动
 
 GitHub Release 的 86MB 包在国内经常超时。用浏览器下载后传上去：
@@ -275,6 +206,15 @@ systemctl restart onepanel
 
 **加第 N 台节点时，老节点一个字都不用改。**
 
+### 多节点登录态
+
+**同一个浏览器不能同时登录多个节点** —— 所有节点共用 `Domain=.xtay.cn` 的 Cookie，会互相覆盖。
+
+解法：
+
+- **统一各节点的 `JWT_SECRET`**（同一把钥匙签发的 token 全网通用，不会互相踢）
+- 或用不同浏览器 / 无痕窗口分别登录
+
 ### 入网方式
 
 | 方式 | 需要人工批准 | 说明 |
@@ -355,17 +295,26 @@ docker compose up -d
 
 | 版本 | 主要变更 |
 |---|---|
-| **v3.14.1** | 已入网节点可从网络自动拉取域名配置 |
+| **v3.28.3** | 修复 op.sh 里 JS 注释被 bash 当命令执行 |
+| v3.28.2 | 菜单第 1 项：已装走升级、未装才安装 |
+| v3.28.1 | 脚本自动判断国内外 + 包裁剪到 54MB |
+| v3.28.0 | Passkey 跨节点同步 + 打开设置拉最新配置 |
+| v3.27.1 | 登录页通行密钥按钮修复 + 2FA 页可切换 |
+| v3.27.0 | 卡片样式同步 + passkey status 500 修复 |
+| v3.26.0 | Passkey user.id 随机（修认证器去重） |
+| v3.25.0 | 登录页通行密钥入口 + 拓扑固定顶部 |
+| v3.24.0 | 删解密转移JSON + PRF salt 类型修复 |
+| v3.23.0 | 共享网络三区块改折叠 |
+| v3.22.0 | 删编辑弹窗里的桌面小组件选择器 |
+| v3.21.1 | 入网轮询限流修复 |
+| v3.21.0 | 入网方式统一为账号密码 + 人工批准 |
+| v3.20.0 | PWA 文件缺失 + readThemeCookie 修复 |
+| v3.19.1 | Cookie 按请求动态决定 |
+| v3.19.0 | 初始化向导填域名配置 |
+| v3.18.0 | 域名配置可在面板界面改 |
+| v3.17.0 | arm64 缺 Prisma 引擎修复 |
 | v3.14.0 | 网络域名配置入网自动继承 |
-| v3.13.5 | 主题强调色选框与上一行对齐 |
-| v3.13.4 | 强调色改用标准 color-picker |
-| v3.13.3 | 节点状态卡移到网络拓扑图 |
-| v3.13.2 | 全网节点状态汇总 |
-| v3.13.1 | 打包带扩展目录 + 段间距 |
-| v3.13.0 | 入网需人工批准（账号密码方式） |
-| v3.12.1 | 登录页安全修复 |
-| v3.12.0 | 浏览器扩展重做（跟随主题） |
-| v3.11.3 | 修复安装包缺前端产物 |
+| v3.13.0 | 入网需人工批准 |
 | v3.11.0 | 三种安装方式 + 升级接口 |
 
 ---
