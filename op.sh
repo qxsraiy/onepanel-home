@@ -96,7 +96,7 @@ gh_fetch() {
 
 # 直连探测：海外服务器直连更快，国内需要镜像。先测直连能否 3 秒内通
 GH_DIRECT_OK=0
-if curl --http1.1 -fsSL --connect-timeout 3 --max-time 5 -o /dev/null "https://api.github.com/rate_limit" 2>/dev/null; then
+if curl --http1.1 -fsSL --connect-timeout 3 --max-time 5 -H "User-Agent: onepanel-installer" -o /dev/null "https://api.github.com/rate_limit" 2>/dev/null; then
   GH_DIRECT_OK=1
 fi
 
@@ -122,10 +122,11 @@ gh_text() {
 
   for try in "${tries[@]}"; do
     # -f 会拒绝 4xx/5xx；再额外校验内容，避免镜像返回 HTML 首页被当成功
-    r="$(curl --http1.1 -fsSL --connect-timeout 10 --max-time 25 "$try" 2>/dev/null)" || continue
-    case "$url" in
-      *releases/latest*) printf '%s' "$r" | grep -q '"tag_name"' || continue ;;
-      *releases?per_page*|*releases$*) printf '%s' "$r" | grep -q 'tag_name' || continue ;;
+    r="$(curl --http1.1 -fsSL --connect-timeout 10 --max-time 25 -H "User-Agent: onepanel-installer" -H "Accept: application/vnd.github+json" "$try" 2>/dev/null)" || continue
+    # 用 case 匹配，避免 printf|grep -q 在 pipefail 下被 SIGPIPE 误判为失败
+    case "$r" in
+      *'"tag_name"'*) ;;
+      *) continue ;;
     esac
     printf '%s' "$r"
     return 0

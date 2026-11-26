@@ -48,7 +48,7 @@ gh_fetch() {
 
 # 直连探测：海外直连优先，国内镜像优先
 GH_DIRECT_OK=0
-if curl --http1.1 -fsSL --connect-timeout 3 --max-time 4 -o /dev/null "https://api.github.com/rate_limit" 2>/dev/null; then
+if curl --http1.1 -fsSL --connect-timeout 3 --max-time 5 -H "User-Agent: onepanel-upgrader" -o /dev/null "https://api.github.com/rate_limit" 2>/dev/null; then
   GH_DIRECT_OK=1
 fi
 
@@ -71,8 +71,11 @@ gh_text() {
   fi
 
   for try in "${tries[@]}"; do
-    r="$(curl --http1.1 -fsSL --connect-timeout 10 --max-time 25 "$try" 2>/dev/null)" || continue
-    printf '%s' "$r" | grep -q '"tag_name"' || continue
+    r="$(curl --http1.1 -fsSL --connect-timeout 10 --max-time 25 -H "User-Agent: onepanel-upgrader" -H "Accept: application/vnd.github+json" "$try" 2>/dev/null)" || continue
+    case "$r" in
+      *'"tag_name"'*) ;;
+      *) continue ;;
+    esac
     printf '%s' "$r"
     return 0
   done
