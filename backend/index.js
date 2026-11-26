@@ -1258,6 +1258,21 @@ const joinLimiter = rateLimit({
   message: { error: '加入尝试过于频繁，请 15 分钟后再试' },
 });
 
+/**
+ * 【v3.21.1】轮询专用宽松限流。
+ * 入网批准流程每 5 秒轮询一次，10 分钟约 120 次；
+ * 用 joinLimiter（15 分钟 10 次）会立刻被限流，
+ * 表现就是"批准了但没加入 + 再次申请提示频繁"。
+ */
+const joinPollLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 400,
+  standardHeaders: false,
+  legacyHeaders: false,
+  validate: { trustProxy: false, xForwardedForHeader: false },
+  message: { error: '查询过于频繁' },
+});
+
 function issueJoinToken(nodeId, publicKey, selfUrls) {
   const token = crypto.randomBytes(24).toString('hex');
   joinTokens.set(token, { nodeId, publicKey, selfUrls: selfUrls || '', exp: Date.now() + JOIN_TTL_MS });
@@ -1289,7 +1304,7 @@ function consumeJoinToken(token, nodeId) {
  * 队列存内存：老节点重启即清空，未批准的请求自动失效（安全默认）。
  */
 const joinPending = new Map();
-const JOIN_PENDING_TTL = 5 * 60 * 1000;
+const JOIN_PENDING_TTL = 10 * 60 * 1000;   // 从 5 提到 10 分钟，避免批准时已过期
 
 function pruneJoinPending() {
   const now = Date.now();
@@ -1349,7 +1364,7 @@ app.post('/api/join/request', joinLimiter, ah(async (req, res) => {
 }));
 
 /** 新节点轮询：请求被批准了吗 */
-app.get('/api/join/pending/:requestId', joinLimiter, ah(async (req, res) => {
+app.get('/api/join/pending/:requestId', joinPollLimiter, ah(async (req, res) => {
   const id = String(req.params.requestId || '');
   const rec = joinPending.get(id);
   if (!rec) return res.status(404).json({ error: '请求不存在或已过期（请重新发起）' });
@@ -1403,7 +1418,7 @@ app.post('/api/join/reject', authenticateToken, ah(async (req, res) => {
 }));
 
 /** 老节点侧：凭令牌一次性拿全量（items 是密文，另附账号与密钥包裹以便新节点直接可用） */
-app.get('/api/join/snapshot', joinLimiter, ah(async (req, res) => {
+app.get('/api/join/snapshot', joinPollLimiter, ah(async (req, res) => {
   // 优先用请求头，避免 token 落到反代/访问日志里
   const token = String(req.headers['x-join-token'] || req.query.token || '');
   // 配对令牌在消费前先取出标记（consumeJoinToken 会删除记录）
@@ -1527,11 +1542,11 @@ app.post('/api/join/from', joinLimiter, ah(async (req, res) => {
     // 【安全 v3.13.0】202 = 对方要求人工批准，轮询等待（最多 5 分钟）
     if (r.status === 202 && data.pending) {
       const requestId = data.requestId;
-      const deadline = Date.now() + 5 * 60 * 1000;
+      const deadline = Date.now() + 10 * 60 * 1000;
       console.log('⏳ 已发起入网请求，等待老节点管理员批准（最多 5 分钟）…');
       let approved = null;
       while (Date.now() < deadline) {
-        await new Promise((rr) => setTimeout(rr, 3000));
+        await new Promise((rr) => setTimeout(rr, 5000));
         try {
           const pr = await fetch(url + '/api/join/pending/' + encodeURIComponent(requestId), {
             signal: AbortSignal.timeout(10000),
