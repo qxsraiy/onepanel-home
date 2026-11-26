@@ -23,17 +23,40 @@ LOCAL_PKG=""
 # 用本地包升级（国内下载不动时的兜底）：--pkg /path/to/onepanel-X.Y.Z-linux-x64.tar.gz
 if [[ "${1:-}" == "--pkg" && -n "${2:-}" ]]; then LOCAL_PKG="$2"; MODE="local"; fi
 
-# GitHub 加速镜像（国内直连经常超时）
-MIRRORS=()
-if [ -n "${GH_PROXY:-}" ]; then MIRRORS+=("${GH_PROXY%/}/"); fi
-MIRRORS+=("" "https://ghfast.top/" "https://gh-proxy.com/" "https://ghproxy.net/")
+# ---------- 下载源 ----------
+# 与 op.sh 一致：自建镜像 down.xtay.cn 优先，其次公共镜像，最后直连
+MIRROR_SELF="${OP_MIRROR:-https://down.xtay.cn}"
+MIRROR_PUBLIC=("https://ghfast.top" "https://gh-proxy.com" "https://ghproxy.net")
+
 gh_fetch() {
-  local url="$1" out="$2" tmo="${3:-60}" m
-  for m in "${MIRRORS[@]}"; do
-    if curl -fsSL --connect-timeout 10 --max-time "$tmo" -o "$out" "${m}${url}" 2>/dev/null; then
-      [ -n "$m" ] && log "镜像：$m"
+  local url="$1" out="$2" tmo="${3:-60}" try m
+  local -a tries=()
+  case "$url" in
+    https://github.com/*) tries+=("${MIRROR_SELF%/}/${url#https://github.com/}") ;;
+    https://api.github.com/*) tries+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}") ;;
+  esac
+  for m in "${MIRROR_PUBLIC[@]}"; do tries+=("${m%/}/${url}"); done
+  tries+=("$url")
+  for try in "${tries[@]}"; do
+    if curl -fsSL --connect-timeout 10 --max-time "$tmo" -o "$out" "$try" 2>/dev/null; then
+      [ "$try" != "$url" ] && log "走镜像：$try"
       return 0
     fi
+  done
+  return 1
+}
+
+gh_text() {
+  local url="$1" try r m
+  local -a tries=()
+  case "$url" in
+    https://api.github.com/*) tries+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}") ;;
+    https://github.com/*) tries+=("${MIRROR_SELF%/}/${url#https://github.com/}") ;;
+  esac
+  for m in "${MIRROR_PUBLIC[@]}"; do tries+=("${m%/}/${url}"); done
+  tries+=("$url")
+  for try in "${tries[@]}"; do
+    r="$(curl -fsSL --connect-timeout 10 --max-time 25 "$try" 2>/dev/null)" && { echo "$r"; return 0; }
   done
   return 1
 }

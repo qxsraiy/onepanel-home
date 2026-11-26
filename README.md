@@ -18,6 +18,24 @@ curl -fsSL https://raw.githubusercontent.com/qxsraiy/onepanel-home/main/op.sh -o
 
 > **不要用 jsDelivr 的 `@main`**（有 12 小时缓存，会拿到旧版）。
 
+### 下载加速（国内）
+
+脚本内置了镜像：**优先 `down.xtay.cn`**，其次 `ghfast.top` / `gh-proxy.com` / `ghproxy.net`，最后直连 GitHub。
+
+也可以自己指定：
+
+```bash
+OP_MIRROR=https://down.xtay.cn bash /root/op.sh
+```
+
+镜像规则是**域名替换**：
+
+```
+https://github.com/qxsraiy/onepanel-home/releases/download/v3.15.1/xxx.tar.gz
+            ↓ github.com 换成 down.xtay.cn
+https://down.xtay.cn/qxsraiy/onepanel-home/releases/download/v3.15.1/xxx.tar.gz
+```
+
 ### 第二步：运行
 
 ```bash

@@ -45,26 +45,67 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ---------- GitHub 加速镜像 ----------
-# 国内直连 GitHub 经常超时。按顺序尝试：
-#   1) 用户指定的 GH_PROXY   2) 直连   3) 常见公共镜像
-# 找到能用的就记住，后续所有 GitHub 请求都走它。
-GITHUB_MIRRORS=()
-if [[ -n "${GH_PROXY:-}" ]]; then GITHUB_MIRRORS+=("${GH_PROXY%/}/"); fi
-GITHUB_MIRRORS+=("" "https://ghfast.top/" "https://gh-proxy.com/" "https://ghproxy.net/")
+# ---------- 下载源 ----------
+# 国内直连 GitHub 大概率超时。优先级：
+#   ① OP_MIRROR 环境变量（用户指定，域名替换式：https://down.xtay.cn）
+#   ② down.xtay.cn（本项目自建镜像）
+#   ③ ghfast.top / gh-proxy.com / ghproxy.net（公共镜像，前缀拼接式）
+#   ④ 直连 github.com
+# 两种镜像规则都试：域名替换（down.xtay.cn/qxsraiy/...）与前缀拼接（ghfast.top/https://...）
+MIRROR_SELF="${OP_MIRROR:-https://down.xtay.cn}"
+MIRROR_PUBLIC=("https://ghfast.top" "https://gh-proxy.com" "https://ghproxy.net")
 ACTIVE_MIRROR=""
 
-# 带镜像回退的下载：gh_fetch <原始URL> <输出文件> [超时秒]
+# 把 github 系 URL 转成候选镜像地址，逐个尝试
 gh_fetch() {
-  local url="$1" out="$2" tmo="${3:-30}"
-  local m try
-  for m in "${GITHUB_MIRRORS[@]}"; do
-    try="${m}${url}"
+  local url="$1" out="$2" tmo="${3:-30}" try m
+  local -a tries=()
+
+  # ① 自建镜像：域名替换式
+  case "$url" in
+    https://github.com/*)
+      tries+=("${MIRROR_SELF%/}/${url#https://github.com/}")
+      ;;
+    https://api.github.com/*)
+      tries+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}")
+      ;;
+    https://raw.githubusercontent.com/*)
+      tries+=("${MIRROR_SELF%/}/raw/${url#https://raw.githubusercontent.com/}")
+      ;;
+  esac
+
+  # ② 公共镜像：前缀拼接式
+  for m in "${MIRROR_PUBLIC[@]}"; do
+    tries+=("${m%/}/${url}")
+  done
+
+  # ③ 直连
+  tries+=("$url")
+
+  for try in "${tries[@]}"; do
     if curl -fsSL --connect-timeout 10 --max-time "$tmo" -o "$out" "$try" 2>/dev/null; then
-      [ -n "$m" ] && log "已通过镜像加速：$m"
-      ACTIVE_MIRROR="$m"
+      case "$try" in
+        "$url") ACTIVE_MIRROR="" ;;
+        *) ACTIVE_MIRROR="$try"; log "走镜像：$try" ;;
+      esac
       return 0
     fi
+  done
+  return 1
+}
+
+# 文本读取（API 查询）：同样走镜像
+gh_text() {
+  local url="$1" try r
+  local -a tries=()
+  case "$url" in
+    https://api.github.com/*) tries+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}") ;;
+    https://github.com/*) tries+=("${MIRROR_SELF%/}/${url#https://github.com/}") ;;
+  esac
+  for m in "${MIRROR_PUBLIC[@]}"; do tries+=("${m%/}/${url}"); done
+  tries+=("$url")
+  for try in "${tries[@]}"; do
+    r="$(curl -fsSL --connect-timeout 10 --max-time 25 "$try" 2>/dev/null)" && { echo "$r"; return 0; }
   done
   return 1
 }
