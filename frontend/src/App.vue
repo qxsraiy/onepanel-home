@@ -1468,6 +1468,24 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
 
   // 首屏主题：先用本地缓存防止闪烁，再悄悄问云端
+  // readThemeCookie：从轻量 Cookie 读主题（服务端渲染/首屏兜底用），
+  // 读不到返回空对象，不抛错。
+  function readThemeCookie() {
+    const out = {}
+    try {
+      const raw = String(document.cookie || '')
+      for (const part of raw.split(';')) {
+        const idx = part.indexOf('=')
+        if (idx < 0) continue
+        const k = part.slice(0, idx).trim()
+        const v = decodeURIComponent(part.slice(idx + 1).trim())
+        if (k === 'op_theme_bg') out.themeBg = v
+        else if (k === 'op_theme_color') out.themeColor = v
+        else if (k === 'op_theme_accent') out.themeAccent = v
+      }
+    } catch { /* 忽略 */ }
+    return out
+  }
   const themeCookie = readThemeCookie()
   const cachedBg = themeCookie.themeBg || safeHex(localStorage.getItem('themeBg'), null)
   const cachedColor = themeCookie.themeColor || safeHex(localStorage.getItem('themeColor'), null)
