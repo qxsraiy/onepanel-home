@@ -739,16 +739,12 @@ function authCookie(token, maxAge = 30 * 24 * 3600, req = null) {
     isHttps = req.secure || String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
   }
 
-  // Domain：只在 host 属于该域时才加
+  // Domain：配置了就加上。
+  // 【v3.21.2 修复】不再做 host 匹配判断 —— 反代常把 Host 改写成 127.0.0.1:5266，
+  // 按 Host 判断会导致域名访问时漏加 Domain，浏览器收不到 Cookie → 「登录已失效」。
+  // 配置了 COOKIE_DOMAIN 就说明你确实在用那个域，直接加。
   if (COOKIE_DOMAIN) {
-    const cd = COOKIE_DOMAIN.replace(/^\./, '').toLowerCase();
-    const match = !host || host === cd || host.endsWith('.' + cd);
-    if (match) {
-      parts.push('Domain=' + COOKIE_DOMAIN);
-    } else if (!cookieWarned) {
-      cookieWarned = true;
-      console.warn('[cookie] COOKIE_DOMAIN=' + COOKIE_DOMAIN + ' 与当前访问地址 ' + host + ' 不匹配，本次不加 Domain（否则浏览器会丢弃 Cookie）。请确认你用的是该域下的地址访问。');
-    }
+    parts.push('Domain=' + COOKIE_DOMAIN);
   }
 
   // Secure：只在 https 时加
