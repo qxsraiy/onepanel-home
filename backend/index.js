@@ -1820,6 +1820,52 @@ app.get('/api/setup/state', ah(async (req, res) => {
   });
 }));
 
+/**
+ * 初始化向导里填写域名配置（免登录）
+ * ------------------------------------------------------------------
+ * 场景：这台是"新组织"的第一台节点，用户在引导页就要定好父域。
+ * 安全限制：只在"还没改过初始密码"的全新节点上允许（和 reset-skip 同级）。
+ * 改过密码后想改域名，必须登录后在 设置 → 共享网络 里操作。
+ */
+app.post('/api/setup/domain', ah(async (req, res) => {
+  const config = await prisma.appConfig.findUnique({ where: { id: 1 } });
+  if (!config) return res.status(503).json({ error: '系统尚未初始化' });
+  if (config.isFirstLogin === false) {
+    return res.status(403).json({
+      error: '这台设备已初始化完成，请登录后在「设置 → 共享网络 → 网络域名配置」里修改',
+      code: 'ALREADY_INITIALIZED',
+    });
+  }
+  const body = req.body || {};
+  let cookieDomain = String(body.cookieDomain ?? '').trim();
+  const webauthnRpId = String(body.webauthnRpId ?? '').trim();
+  const DOMAIN_RE = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/;
+  if (webauthnRpId && !DOMAIN_RE.test(webauthnRpId)) {
+    return res.status(400).json({ error: 'RP ID 格式不对，应形如 xtay.cn' });
+  }
+  if (cookieDomain) {
+    cookieDomain = cookieDomain.startsWith('.') ? cookieDomain : '.' + cookieDomain;
+    if (!DOMAIN_RE.test(cookieDomain.slice(1))) {
+      return res.status(400).json({ error: 'Cookie 域格式不对，应形如 .xtay.cn' });
+    }
+    if (webauthnRpId) {
+      const cd = cookieDomain.slice(1);
+      if (cd !== webauthnRpId && !cd.endsWith('.' + webauthnRpId)) {
+        return res.status(400).json({ error: 'Cookie 域必须是 RP ID 的子域或自身' });
+      }
+    }
+  }
+  if (!cookieDomain && !webauthnRpId) return res.json({ success: true, skipped: true });
+  await prisma.$executeRawUnsafe(
+    'UPDATE AppConfig SET cookieDomain = ?, webauthnRpId = ? WHERE id = 1',
+    cookieDomain || null, webauthnRpId || null
+  );
+  COOKIE_DOMAIN = cookieDomain;
+  WEBAUTHN_RP_ID_RUNTIME = webauthnRpId;
+  console.log('[setup] 已设置域名 cookieDomain=' + (cookieDomain || '-') + ' rpId=' + (webauthnRpId || '-'));
+  res.json({ success: true, cookieDomain, webauthnRpId });
+}));
+
 /** 选择"不加入网络，单独使用"：只记一个标记，之后正常走首次登录改密 */
 app.post('/api/setup/skip', ah(async (req, res) => {
   const items = await prisma.item.count();

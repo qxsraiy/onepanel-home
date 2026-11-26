@@ -112,14 +112,30 @@ async function joinByAccount() {
   } finally { busy.value = false; }
 }
 
+// 【新组织第一台】单独使用前先定域名（可跳过）
+const domainForm = ref({ cookieDomain: '', webauthnRpId: '' });
+const domainBusy = ref(false);
+
 async function useStandalone() {
-  busy.value = true;
+  // 先进入域名配置步骤（不是直接 skip）
+  mode.value = 'standalone';
+}
+
+async function confirmStandalone(skipDomain) {
+  domainBusy.value = true;
   try {
+    if (!skipDomain) {
+      const cd = String(domainForm.value.cookieDomain || '').trim();
+      const rp = String(domainForm.value.webauthnRpId || '').trim();
+      if (cd || rp) {
+        await axios.post('/api/setup/domain', { cookieDomain: cd, webauthnRpId: rp });
+      }
+    }
     await axios.post('/api/setup/skip');
     emit('done');
   } catch (e) {
-    toast(e.response?.data?.error || '操作失败', 'error');
-  } finally { busy.value = false; }
+    toast(e.response?.data?.error || '操作失败', 'error', 6000);
+  } finally { domainBusy.value = false; }
 }
 </script>
 
@@ -171,6 +187,45 @@ async function useStandalone() {
           </div>
           <AppIcon icon="mdi:chevron-right" class="entry-arrow" />
         </button>
+      </div>
+
+      <!-- 单独使用：先定域名（新组织第一台） -->
+      <div v-else-if="mode === 'standalone'" class="standalone-panel">
+        <p class="sa-tip">
+          这台将成为你网络里的<b>第一台节点</b>。<br>
+          如果你有多台服务器（比如 <code>cn.xtay.cn</code> 和 <code>us.xtay.cn</code>），
+          现在填好父域，之后加节点就不用再配了。
+        </p>
+
+        <label class="sa-label">Cookie 域（多节点共用登录态）</label>
+        <input
+          v-model="domainForm.cookieDomain"
+          class="glass-input"
+          placeholder=".xtay.cn"
+        />
+
+        <label class="sa-label">Passkey RP ID</label>
+        <input
+          v-model="domainForm.webauthnRpId"
+          class="glass-input"
+          placeholder="xtay.cn"
+        />
+
+        <p class="sa-note">
+          · 只有一台服务器用 IP 访问 → 直接跳过<br>
+          · 有域名但还没配反代 → 先跳过，登录后在设置里补<br>
+          · 两个值的关系：RP ID 是父域（<code>xtay.cn</code>），Cookie 域带前导点（<code>.xtay.cn</code>）
+        </p>
+
+        <div class="sa-actions">
+          <button class="btn-outline" :disabled="domainBusy" @click="confirmStandalone(true)">
+            跳过，先不配
+          </button>
+          <button class="btn-primary" :disabled="domainBusy" @click="confirmStandalone(false)">
+            {{ domainBusy ? '保存中…' : '保存并继续' }}
+          </button>
+        </div>
+        <button class="sa-back" @click="mode = ''">← 返回</button>
       </div>
 
       <!-- 扫码 -->
@@ -238,6 +293,17 @@ async function useStandalone() {
 </template>
 
 <style scoped>
+.standalone-panel { padding: 4px 2px; }
+.sa-tip { font-size: 12.5px; line-height: 1.9; opacity: .72; margin: 0 0 18px; }
+.sa-tip code, .sa-note code { font-family: ui-monospace, monospace; font-size: 11.5px;
+  background: color-mix(in srgb, var(--theme-color) 9%, transparent); padding: 1px 5px; border-radius: 4px; }
+.sa-label { display: block; font-size: 11.5px; opacity: .55; margin: 12px 0 5px; }
+.sa-note { font-size: 11.5px; line-height: 1.9; opacity: .45; margin: 14px 0 18px; }
+.sa-actions { display: flex; gap: 10px; }
+.sa-actions .btn-outline, .sa-actions .btn-primary { flex: 1; }
+.sa-back { margin-top: 16px; background: none; border: none; color: inherit; opacity: .4;
+  font-size: 11.5px; cursor: pointer; padding: 4px 0; }
+.sa-back:hover { opacity: .7; }
 .setup-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .setup-card {
   width: min(520px, 100%); padding: 28px; border-radius: 22px;
