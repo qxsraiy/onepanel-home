@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS "AppConfig" (
     "cardBgOpacity" REAL,
     "twoFactorSecret" TEXT,
     "twoFactorEnabled" BOOLEAN NOT NULL DEFAULT false
-, "vaultSalt" TEXT, "vaultWrapped" TEXT, themeAccent TEXT, uiPrefs TEXT DEFAULT '{}', tokenEpoch INTEGER DEFAULT 0, "cookieDomain" TEXT, "webauthnRpId" TEXT);
+, "vaultSalt" TEXT, "vaultWrapped" TEXT, themeAccent TEXT, uiPrefs TEXT DEFAULT '{}', tokenEpoch INTEGER DEFAULT 0, "cookieDomain" TEXT, "webauthnRpId" TEXT, "cookieSecure" INTEGER);
 CREATE INDEX "ItemUrl_itemId_idx" ON "ItemUrl"("itemId");
 CREATE TABLE IF NOT EXISTS "Item" (
     "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,

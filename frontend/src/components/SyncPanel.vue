@@ -34,6 +34,30 @@ let joinReqTimer = null
 // 网络域名配置（入网时自动继承）
 const netConfig = ref(null)
 const pulling = ref(false)
+// 界面编辑网络域名配置（不用改 env）
+const netEditing = ref(false)
+const netSaving = ref(false)
+const netForm = ref({ cookieDomain: '', webauthnRpId: '', cookieSecure: true })
+function startEditNet() {
+  netForm.value = {
+    cookieDomain: netConfig.value?.cookieDomain || '',
+    webauthnRpId: netConfig.value?.webauthnRpId || '',
+    cookieSecure: netConfig.value?.cookieSecure !== false,
+  }
+  netEditing.value = true
+}
+async function saveNet() {
+  netSaving.value = true
+  try {
+    const { data } = await axios.put('/api/net-config', netForm.value)
+    netEditing.value = false
+    toast(data.needRelogin ? '已保存，域名变了需要重新登录' : '已保存并立即生效', 'success', 6000)
+    await loadNetConfig()
+    if (data.needRelogin) setTimeout(() => location.reload(), 2000)
+  } catch (e) {
+    toast(e.response?.data?.error || '保存失败', 'error', 8000)
+  } finally { netSaving.value = false }
+}
 async function pullNetConfig() {
   pulling.value = true
   try {
@@ -344,30 +368,52 @@ onMounted(load);
       </div>
     </div>
 
-    <!-- ===== 网络域名配置 ===== -->
+    <!-- ===== 网络域名配置（可直接在界面编辑）===== -->
     <div v-if="netConfig" class="setting-block" :class="{ 'cfg-warn': !netConfig.cookieDomain }">
       <h4><AppIcon icon="mdi:earth" /> 网络域名配置</h4>
-      <template v-if="netConfig.cookieDomain">
-        <div class="cfg-row"><span>Cookie 域</span><b>{{ netConfig.cookieDomain }}</b></div>
-        <div class="cfg-row"><span>Passkey RP ID</span><b>{{ netConfig.webauthnRpId || '—' }}</b></div>
-        <div class="cfg-row"><span>来源</span><b>{{ netConfig.source === 'inherited' ? '入网时自动继承' : (netConfig.source === 'env' ? '环境变量' : '未设置') }}</b></div>
-        <p class="tip">加新节点不用改这里——新节点入网时会自动继承，老节点不受影响。</p>
-        <div class="row-actions" style="margin-top:8px">
+
+      <!-- 展示态 -->
+      <template v-if="!netEditing">
+        <template v-if="netConfig.cookieDomain">
+          <div class="cfg-row"><span>Cookie 域</span><b>{{ netConfig.cookieDomain }}</b></div>
+          <div class="cfg-row"><span>Passkey RP ID</span><b>{{ netConfig.webauthnRpId || '—' }}</b></div>
+          <div class="cfg-row"><span>强制 HTTPS</span><b>{{ netConfig.cookieSecure ? '是' : '否' }}</b></div>
+          <div class="cfg-row"><span>来源</span><b>{{ netConfig.source === 'env' ? '环境变量' : (netConfig.source === 'db' ? '面板/入网继承' : '未设置') }}</b></div>
+        </template>
+        <p v-else class="tip warn-text">⚠️ 还没配置。多节点要共用登录态和 Passkey 的话，填一下父域即可。</p>
+        <div class="row-actions" style="margin-top:10px">
+          <button class="btn-outline" @click="startEditNet">{{ netConfig.cookieDomain ? '修改' : '填写配置' }}</button>
           <button class="btn-outline" :disabled="pulling" @click="pullNetConfig">
-            {{ pulling ? '拉取中…' : '从网络重新拉取' }}
+            {{ pulling ? '拉取中…' : '从其他节点拉取' }}
           </button>
         </div>
+        <p class="tip">加新节点不用改这里 —— 新节点入网时会自动继承，老节点不受影响。</p>
       </template>
+
+      <!-- 编辑态 -->
       <template v-else>
-        <p class="tip warn-text">⚠️ 还没配置。这台是第一台节点的话，需要在 <code>onepanel.env</code> 里设 <code>COOKIE_DOMAIN=.你的父域</code> 和 <code>WEBAUTHN_RP_ID=你的父域</code>，然后重启。</p>
-        <div class="row-actions" style="margin-top:8px">
-          <button class="btn-outline" :disabled="pulling" @click="pullNetConfig">
-            {{ pulling ? '拉取中…' : '从其他节点自动拉取' }}
-          </button>
+        <div class="cfg-edit">
+          <label>Cookie 域（多节点共用登录态）</label>
+          <input v-model="netForm.cookieDomain" class="glass-input" placeholder=".xtay.cn（前面带点是父域）" />
+          <label>Passkey RP ID（必须和访问域名同源）</label>
+          <input v-model="netForm.webauthnRpId" class="glass-input" placeholder="xtay.cn（不要带前导点）" />
+          <label class="cfg-check">
+            <input type="checkbox" v-model="netForm.cookieSecure" />
+            强制 Cookie 走 HTTPS（反代 + SSL 时必开）
+          </label>
+          <p class="tip">
+            <b>说明：</b>域名是 <code>cn.xtay.cn</code> / <code>us.xtay.cn</code> 这种时，父域就是 <code>xtay.cn</code>。<br>
+            填完后保存立即生效，不用重启服务。改了 Cookie 域需要重新登录一次。
+          </p>
+          <div class="row-actions" style="margin-top:10px">
+            <button class="btn-primary" :disabled="netSaving" @click="saveNet">
+              {{ netSaving ? '保存中…' : '保存' }}
+            </button>
+            <button class="btn-outline" :disabled="netSaving" @click="netEditing = false">取消</button>
+          </div>
         </div>
       </template>
     </div>
-
     <!-- ===== 网络拓扑 ===== -->
     <div class="setting-block">
       <h4><AppIcon icon="mdi:lan-connect" /> 网络拓扑</h4>
@@ -520,6 +566,10 @@ onMounted(load);
 .nt-row { display: flex; gap: 10px; }
 .nt-row span { width: 62px; opacity: .5; flex-shrink: 0; }
 .nt-row b { font-weight: 500; }
+.cfg-edit { display: flex; flex-direction: column; gap: 4px; }
+.cfg-edit label { font-size: 11.5px; opacity: .55; margin: 8px 0 3px; }
+.cfg-edit .cfg-check { display: flex; align-items: center; gap: 8px; font-size: 12px; opacity: .8; margin-top: 10px; cursor: pointer; }
+.cfg-edit .cfg-check input { width: auto; }
 .cfg-row { display: flex; gap: 12px; font-size: 12.5px; padding: 6px 10px; border-radius: 8px;
   background: color-mix(in srgb, var(--theme-color) 4%, transparent); margin-bottom: 6px; }
 .cfg-row span { width: 100px; opacity: .55; flex-shrink: 0; }

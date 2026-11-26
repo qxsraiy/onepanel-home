@@ -183,10 +183,11 @@ async function initSystem() {
 
   // 【v3.14.0】加载网络域名配置（DB 优先，env 兜底）
   try {
-    const nc = await prisma.$queryRawUnsafe('SELECT cookieDomain, webauthnRpId FROM AppConfig WHERE id = 1');
+    const nc = await prisma.$queryRawUnsafe('SELECT cookieDomain, webauthnRpId, cookieSecure FROM AppConfig WHERE id = 1');
     const row = nc && nc[0];
     if (row?.cookieDomain) COOKIE_DOMAIN = row.cookieDomain;
     if (row?.webauthnRpId) WEBAUTHN_RP_ID_RUNTIME = row.webauthnRpId;
+    if (row?.cookieSecure !== null && row?.cookieSecure !== undefined) COOKIE_SECURE = !!row.cookieSecure;
   } catch { /* 列不存在时忽略 */ }
 
   // 【v3.14.1】如果本地域名配置还是空的，启动后异步向已入网节点要一次
@@ -709,7 +710,7 @@ function checkPasswordStrength(pw) {
  */
 let COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || '';
 let WEBAUTHN_RP_ID_RUNTIME = String(process.env.WEBAUTHN_RP_ID || '').trim();
-const COOKIE_SECURE = (process.env.COOKIE_SECURE || 'auto') !== '0';
+let COOKIE_SECURE = (process.env.COOKIE_SECURE || 'auto') !== '0';
 function authCookie(token, maxAge = 30 * 24 * 3600) {
   const parts = [
     'auth_token=' + encodeURIComponent(token),
@@ -946,10 +947,74 @@ app.get('/api/net-config', authenticateToken, (req, res) => {
     cookieDomain: COOKIE_DOMAIN || '',
     webauthnRpId: WEBAUTHN_RP_ID_RUNTIME || '',
     cookieSecure: COOKIE_SECURE,
-    // 从 env 来的还是入网继承的
-    source: (COOKIE_DOMAIN && process.env.COOKIE_DOMAIN) ? 'env' : (COOKIE_DOMAIN ? 'inherited' : 'unset'),
+    // 判断来源：DB 里有值 = 界面/入网设的；否则看 env
+    source: (COOKIE_DOMAIN && process.env.COOKIE_DOMAIN) ? 'env' : (COOKIE_DOMAIN ? 'db' : 'unset'),
   });
 });
+
+/**
+ * 管理员在界面上直接改网络域名配置（不用再去改 env 文件）
+ * 写入 DB + 立即更新内存变量，无需重启。
+ */
+app.put('/api/net-config', authenticateToken, ah(async (req, res) => {
+  const body = req.body || {};
+  let cookieDomain = String(body.cookieDomain ?? '').trim();
+  let webauthnRpId = String(body.webauthnRpId ?? '').trim();
+  const cookieSecure = body.cookieSecure === undefined ? null : !!body.cookieSecure;
+
+  // 校验：域名（允许前导点）
+  const DOMAIN_RE = /^\.?[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/;
+  if (cookieDomain && !DOMAIN_RE.test(cookieDomain)) {
+    return res.status(400).json({ error: 'COOKIE_DOMAIN 格式不对，应形如 .xtay.cn 或 panel.xtay.cn' });
+  }
+  if (webauthnRpId && !DOMAIN_RE.test(webauthnRpId)) {
+    return res.status(400).json({ error: 'WEBAUTHN_RP_ID 格式不对，应形如 xtay.cn（不要带前导点）' });
+  }
+  // RP ID 不能带前导点
+  if (webauthnRpId.startsWith('.')) {
+    return res.status(400).json({ error: 'WEBAUTHN_RP_ID 不能带前导点，写 xtay.cn 即可' });
+  }
+  // Cookie 域必须是 RP ID 的子域或自身（否则 Passkey 与登录态不在同一棵树）
+  if (cookieDomain && webauthnRpId) {
+    const cd = cookieDomain.replace(/^\./, '');
+    if (cd !== webauthnRpId && !cd.endsWith('.' + webauthnRpId)) {
+      return res.status(400).json({
+        error: 'COOKIE_DOMAIN 必须是 WEBAUTHN_RP_ID 的子域。例如 RP_ID=xtay.cn，COOKIE_DOMAIN 应为 .xtay.cn',
+      });
+    }
+  }
+
+  const oldDomain = COOKIE_DOMAIN;
+  try {
+    if (cookieSecure === null) {
+      await prisma.$executeRawUnsafe(
+        'UPDATE AppConfig SET cookieDomain = ?, webauthnRpId = ? WHERE id = 1',
+        cookieDomain || null, webauthnRpId || null
+      );
+    } else {
+      await prisma.$executeRawUnsafe(
+        'UPDATE AppConfig SET cookieDomain = ?, webauthnRpId = ?, cookieSecure = ? WHERE id = 1',
+        cookieDomain || null, webauthnRpId || null, cookieSecure ? 1 : 0
+      );
+    }
+  } catch (e) {
+    return res.status(500).json({ error: '写入失败：' + e.message });
+  }
+
+  COOKIE_DOMAIN = cookieDomain;
+  WEBAUTHN_RP_ID_RUNTIME = webauthnRpId;
+  if (cookieSecure !== null) COOKIE_SECURE = cookieSecure;
+
+  console.log('[net-config] 已更新 cookieDomain=' + (cookieDomain || '-') + ' rpId=' + (webauthnRpId || '-') + ' secure=' + COOKIE_SECURE);
+  res.json({
+    success: true,
+    cookieDomain: COOKIE_DOMAIN,
+    webauthnRpId: WEBAUTHN_RP_ID_RUNTIME,
+    cookieSecure: COOKIE_SECURE,
+    // 域名变了，旧 Cookie 挂在旧域上，需要重新登录
+    needRelogin: oldDomain !== COOKIE_DOMAIN,
+  });
+}));
 
 /**
  * 从已入网的节点拉取域名配置（v3.14.1）

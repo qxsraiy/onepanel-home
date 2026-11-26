@@ -54,6 +54,7 @@ async function ensureColumns(prisma) {
     // v3.14.0：网络域名配置（入网时由老节点下发）
     'ALTER TABLE AppConfig ADD COLUMN cookieDomain TEXT',
     'ALTER TABLE AppConfig ADD COLUMN webauthnRpId TEXT',
+    'ALTER TABLE AppConfig ADD COLUMN cookieSecure INTEGER',
   ];
   let done = 0;
   for (const sql of adds) {
