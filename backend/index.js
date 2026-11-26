@@ -741,6 +741,25 @@ const authenticateNode = ah(async (req, res, next) => {
   next();
 });
 
+/** 节点间：取对方系统状态（给"全网节点状态汇总"用，需节点签名） */
+app.get('/api/sync/stats', authenticateNode, (req, res) => {
+  try {
+    const s = getSystemStats();
+    res.json({
+      nodeId: nodeIdentity.self().nodeId,
+      nodeName: nodeState.get('nodeName', ''),
+      version: APP_VERSION,
+      uptimeSec: Math.round(process.uptime()),
+      cpu: s.cpu,
+      mem: s.mem,
+      disk: s.disk,
+      ts: Date.now(),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 /** 取对方水位（StateVector） */
 app.get('/api/sync/vector', authenticateNode, ah(async (req, res) => {
   const vector = await syncEngine.localVector();
@@ -836,6 +855,65 @@ app.get('/api/sync/snapshot', authenticateNode, ah(async (req, res) => {
     passkeys: await prisma.$queryRawUnsafe('SELECT credentialId, publicKey, counter, label, prfWrapped FROM Passkey').catch(() => []),
     ts: Date.now(),
   });
+}));
+
+/**
+ * 全网节点状态汇总（需登录）
+ * ------------------------------------------------------------------
+ * 并发向每个成员节点的 /api/sync/stats 发签名请求，汇总 CPU/内存/磁盘/版本。
+ * 单台失败不影响其它台（返回 online:false + 原因）。
+ */
+app.get('/api/nodes/stats', authenticateToken, ah(async (req, res) => {
+  const members = await prisma.member.findMany();
+  const selfId = nodeIdentity.self().nodeId;
+  const { signRequest } = require('./services/syncEngine');
+
+  const selfStats = (() => {
+    try {
+      const s = getSystemStats();
+      return {
+        nodeId: selfId, nodeName: nodeState.get('nodeName', '') || '本机',
+        version: APP_VERSION, online: true, self: true,
+        uptimeSec: Math.round(process.uptime()),
+        cpu: s.cpu, mem: s.mem, disk: s.disk,
+      };
+    } catch { return { nodeId: selfId, online: true, self: true }; }
+  })();
+
+  const probe = async (m) => {
+    const urls = String(m.selfUrls || '').split(',').map((u) => u.trim()).filter(Boolean);
+    if (!urls.length) {
+      return { nodeId: m.nodeId, nodeName: m.name || '', online: false, error: '未上报地址',
+        lastSeen: m.lastSeen, lastSyncAt: m.lastSyncAt };
+    }
+    let lastErr = '';
+    for (const base of urls) {
+      try {
+        const url = base.replace(/\/$/, '') + '/api/sync/stats';
+        const ts = String(Date.now());
+        const sig = signRequest({ ts, method: 'GET', path: '/api/sync/stats' });
+        const r = await fetch(url, {
+          headers: {
+            'x-op-node': selfId, 'x-op-ts': ts, 'x-op-sign': sig,
+          },
+          signal: AbortSignal.timeout(4000),
+        });
+        if (!r.ok) { lastErr = 'HTTP ' + r.status; continue; }
+        const d = await r.json();
+        return {
+          nodeId: m.nodeId, nodeName: d.nodeName || m.name || '', online: true,
+          version: d.version, uptimeSec: d.uptimeSec,
+          cpu: d.cpu, mem: d.mem, disk: d.disk,
+          lastSeen: m.lastSeen, lastSyncAt: m.lastSyncAt,
+        };
+      } catch (e) { lastErr = e.name === 'TimeoutError' ? '连接超时' : e.message; }
+    }
+    return { nodeId: m.nodeId, nodeName: m.name || '', online: false, error: lastErr || '无法连接',
+      lastSeen: m.lastSeen, lastSyncAt: m.lastSyncAt };
+  };
+
+  const others = await Promise.all(members.filter((m) => m.nodeId !== selfId).map(probe));
+  res.json({ self: selfStats, nodes: others, ts: Date.now() });
 }));
 
 /** 节点列表与同步状态（需登录） */

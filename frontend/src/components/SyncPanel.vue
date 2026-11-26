@@ -30,6 +30,41 @@ const showMembers = ref(false)
 // 【安全 v3.13.0】待批准的入网请求（账号密码方式入网时，必须在这里点批准）
 const joinRequests = ref([])
 let joinReqTimer = null
+// 【全网节点状态】鼠标悬停节点时显示该节点的 CPU/内存/磁盘
+const nodeStats = ref({ self: null, nodes: [], ts: 0 })
+const hoverNodeId = ref('')
+let nodeStatsTimer = null
+async function loadNodeStats() {
+  try {
+    const { data } = await axios.get('/api/nodes/stats')
+    nodeStats.value = data
+  } catch { /* 忽略 */ }
+}
+/** 按 nodeId 找状态：本机返回 self，其他在 nodes 里找 */
+function statsFor(nodeId) {
+  const s = nodeStats.value
+  if (!s) return null
+  if (nodeId && s.self && s.self.nodeId === nodeId) return s.self
+  return (s.nodes || []).find((n) => n.nodeId === nodeId) || null
+}
+function fmtMem(mem) {
+  if (!mem || !mem.total) return '—'
+  const g = (n) => (n / 1024 / 1024 / 1024).toFixed(1)
+  return g(mem.used) + ' / ' + g(mem.total) + ' GB（' + (mem.percent ?? 0) + '%）'
+}
+function fmtDisk(disk) {
+  if (!disk || !disk.total) return '—'
+  const g = (n) => (n / 1024 / 1024 / 1024).toFixed(1)
+  return g(disk.used) + ' / ' + g(disk.total) + ' GB（' + (disk.percent ?? 0) + '%）'
+}
+function fmtUptime(sec) {
+  if (!sec && sec !== 0) return '—'
+  const d = Math.floor(sec / 86400)
+  const h = Math.floor((sec % 86400) / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  return (d ? d + ' 天 ' : '') + h + ' 小时 ' + m + ' 分'
+}
+
 async function loadJoinRequests() {
   try {
     const { data } = await axios.get('/api/join/requests')
@@ -54,8 +89,13 @@ async function rejectJoin(item) {
 onMounted(() => {
   loadJoinRequests()
   joinReqTimer = setInterval(loadJoinRequests, 5000)
+  loadNodeStats()
+  nodeStatsTimer = setInterval(loadNodeStats, 15000)
 })
-onUnmounted(() => { if (joinReqTimer) clearInterval(joinReqTimer) });
+onUnmounted(() => {
+  if (joinReqTimer) clearInterval(joinReqTimer)
+  if (nodeStatsTimer) clearInterval(nodeStatsTimer)
+});
 const showAdvanced = ref(false);
 const peerUrl = ref('');
 const joinForm = ref({ url: '', username: '', password: '', selfUrls: '' });
@@ -309,13 +349,56 @@ onMounted(load);
           </div>
         </div>
 
+        <div class="member-list" style="margin-bottom:10px">
+          <div class="member-row self-row" @mouseenter="hoverNodeId = status?.nodeId || ''" @mouseleave="hoverNodeId = ''">
+            <span class="dot active"></span>
+            <code class="member-id">{{ status?.nodeName || '本机' }}</code>
+            <span class="member-url">本地节点（你自己）</span>
+            <span class="member-time">{{ fmtTime(status?.lastSyncAt) }}</span>
+            <div v-if="hoverNodeId === (status?.nodeId || '')" class="node-tip">
+              <div class="nt-head">
+                <span class="nt-name">{{ status?.nodeName || '本机' }}</span>
+                <span class="nt-badge on">在线</span>
+              </div>
+              <div class="nt-row"><span>版本</span><b>v{{ statsFor(status?.nodeId)?.version || '—' }}</b></div>
+              <div class="nt-row"><span>CPU</span><b>{{ statsFor(status?.nodeId)?.cpu?.usage ?? '—' }}%（{{ statsFor(status?.nodeId)?.cpu?.cores }} 核）</b></div>
+              <div class="nt-row"><span>内存</span><b>{{ fmtMem(statsFor(status?.nodeId)?.mem) }}</b></div>
+              <div class="nt-row"><span>磁盘</span><b>{{ fmtDisk(statsFor(status?.nodeId)?.disk) }}</b></div>
+              <div class="nt-row"><span>已运行</span><b>{{ fmtUptime(statsFor(status?.nodeId)?.uptimeSec) }}</b></div>
+            </div>
+          </div>
+        </div>
+
         <div v-if="!otherMembers.length" class="tip">还没有其他设备。用上面的二维码或授权码邀请一台。</div>
         <div v-else class="member-list">
-          <div v-for="m in otherMembers" :key="m.nodeId" class="member-row" :class="{ hl: highlighted === m.nodeId }" :data-member="m.nodeId">
+          <div
+            v-for="m in otherMembers" :key="m.nodeId"
+            class="member-row" :class="{ hl: highlighted === m.nodeId }" :data-member="m.nodeId"
+            @mouseenter="hoverNodeId = m.nodeId" @mouseleave="hoverNodeId = ''"
+          >
             <span class="dot" :class="m.status"></span>
             <code class="member-id" :title="m.nodeId">{{ m.name || shortId(m.nodeId) }}</code>
             <span class="member-url">{{ m.selfUrls || '—' }}</span>
             <span class="member-time">{{ fmtTime(m.lastSyncAt) }}</span>
+
+            <!-- 悬停状态卡 -->
+            <div v-if="hoverNodeId === m.nodeId" class="node-tip">
+              <div class="nt-head">
+                <span class="nt-name">{{ m.name || shortId(m.nodeId) }}</span>
+                <span class="nt-badge" :class="statsFor(m.nodeId)?.online ? 'on' : 'off'">
+                  {{ statsFor(m.nodeId)?.online ? '在线' : '离线' }}
+                </span>
+              </div>
+              <template v-if="statsFor(m.nodeId)?.online">
+                <div class="nt-row"><span>版本</span><b>v{{ statsFor(m.nodeId)?.version || '—' }}</b></div>
+                <div class="nt-row"><span>CPU</span><b>{{ statsFor(m.nodeId)?.cpu?.usage ?? '—' }}%（{{ statsFor(m.nodeId)?.cpu?.cores }} 核）</b></div>
+                <div class="nt-row"><span>内存</span><b>{{ fmtMem(statsFor(m.nodeId)?.mem) }}</b></div>
+                <div class="nt-row"><span>磁盘</span><b>{{ fmtDisk(statsFor(m.nodeId)?.disk) }}</b></div>
+                <div class="nt-row"><span>已运行</span><b>{{ fmtUptime(statsFor(m.nodeId)?.uptimeSec) }}</b></div>
+              </template>
+              <div v-else class="nt-row"><span>原因</span><b>{{ statsFor(m.nodeId)?.error || '暂无数据' }}</b></div>
+              <div class="nt-row"><span>最后同步</span><b>{{ fmtTime(m.lastSyncAt) }}</b></div>
+            </div>
           </div>
         </div>
 
@@ -380,6 +463,25 @@ onMounted(load);
 
 <style scoped>
 .sync-pane { padding: 2px; }
+.member-row { position: relative; }
+.self-row { opacity: .72; }
+.node-tip {
+  position: absolute; left: 38px; top: calc(100% + 4px); z-index: 30;
+  min-width: 230px; padding: 10px 12px; border-radius: 11px;
+  background: color-mix(in srgb, var(--theme-bg, #0f172a) 88%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-color) 16%, transparent);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 14px 34px -8px rgba(0,0,0,.6);
+  font-size: 11.5px; line-height: 1.7; pointer-events: none;
+}
+.nt-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.nt-name { font-weight: 600; font-size: 12px; }
+.nt-badge { font-size: 9.5px; padding: 1px 6px; border-radius: 999px; }
+.nt-badge.on { background: color-mix(in srgb, #10b981 22%, transparent); color: #10b981; }
+.nt-badge.off { background: color-mix(in srgb, #f87171 22%, transparent); color: #f87171; }
+.nt-row { display: flex; gap: 10px; }
+.nt-row span { width: 62px; opacity: .5; flex-shrink: 0; }
+.nt-row b { font-weight: 500; }
 .pending-block {
   border-color: color-mix(in srgb, #f59e0b 40%, transparent) !important;
   background: color-mix(in srgb, #f59e0b 6%, transparent);
