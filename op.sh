@@ -349,6 +349,79 @@ do_logs() {
   journalctl -u onepanel -f -n 50 2>/dev/null || true
 }
 
+/**
+ * 【v3.28.2】检测是否已安装：已装走升级，未装走安装
+ * ------------------------------------------------------------------
+ * 之前菜单第 1 项无条件走安装流程 → 已装的机器会重复下载/重复解压同一个版本目录，
+ * 旧文件残留不说，还白白下一遍 54MB。
+ */
+is_installed() {
+  # 软链接（Linux 正常安装形态）
+  if [ -L "${INSTALL_DIR}/current" ] && [ -f "${INSTALL_DIR}/current/.version" ]; then
+    return 0
+  fi
+  # 兜底：目录形态（某些文件系统/容器里 ln -s 退化成目录副本）
+  if [ -d "${INSTALL_DIR}/current" ] && [ -f "${INSTALL_DIR}/current/.version" ]; then
+    return 0
+  fi
+  return 1
+}
+
+do_install_or_upgrade() {
+  if is_installed; then
+    local cur latest
+    cur="$(cat "${INSTALL_DIR}/current/.version" 2>/dev/null || echo '?')"
+    echo ""
+    echo "  已安装：v${cur}"
+    echo "  安装目录：$(readlink "${INSTALL_DIR}/current")"
+    echo ""
+    # 查最新版
+    latest=""
+    local resp
+    resp="$(gh_text "https://api.github.com/repos/qxsraiy/onepanel-home/releases/latest" 2>/dev/null || true)"
+    if [ -n "$resp" ]; then
+      latest="$(printf '%s' "$resp" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"v?([^"]+)".*/\1/')"
+    fi
+    if [ -n "$latest" ]; then
+      echo "  最新版：v${latest}"
+    else
+      echo "  最新版：查询失败（升级时会再试）"
+    fi
+    echo ""
+    echo "  1) 升级到最新版"
+    echo "  2) 重装当前版本 v${cur}（修复用）"
+    echo "  3) 回滚到上一版本"
+    echo "  0) 取消"
+    printf "  请选择 [0-3]: "
+    read -r sub
+    case "$sub" in
+      1)
+        echo ""
+        if [ -z "$latest" ] || [ "$latest" = "$cur" ]; then
+          printf "  已经是（或无法确认）最新版，仍要强制重新下载安装？[y/N] "
+          read -r force
+          case "$force" in y|Y) ;; *) return 0 ;; esac
+        fi
+        bash "${INSTALL_DIR}/current/upgrade.sh" || return 1
+        return 0
+        ;;
+      2)
+        echo ""
+        echo "  重装 v${cur}：会重新下载该版本的包并覆盖安装目录（数据目录不受影响）"
+        printf "  确认？[y/N] "
+        read -r ok2
+        case "$ok2" in y|Y) ;; *) return 0 ;; esac
+        WANT_VERSION="$cur"
+        return 0          # 落回安装流程（会装指定版本）
+        ;;
+      3) bash "${INSTALL_DIR}/current/upgrade.sh" --rollback; return 0 ;;
+      *) return 0 ;;
+    esac
+  fi
+  # 未安装 → 正常安装向导
+  ask_install_options
+}
+
 do_rollback() {
   need_installed || return 1
   bash "${INSTALL_DIR}/current/upgrade.sh" --rollback
@@ -395,7 +468,7 @@ run_menu() {
     printf "  请选择 [0-8]: "
     read -r choice
     case "$choice" in
-      1) if ask_install_options; then return 0; fi ;;
+      1) if do_install_or_upgrade; then return 0; fi ;;
       2) do_uninstall; echo ""; read -r -p "  按回车继续…" _ ;;
       3) do_change_port; echo ""; read -r -p "  按回车继续…" _ ;;
       4) do_status; echo ""; read -r -p "  按回车继续…" _ ;;
