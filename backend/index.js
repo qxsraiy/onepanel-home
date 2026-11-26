@@ -2758,7 +2758,7 @@ app.post('/api/login/verify-2fa', twoFaLimiter, ah(async (req, res) => {
     try { await itemStore.migrateLegacy(); } catch (e) { console.warn('⚠️ 整行加密迁移失败:', e.message); }
   }
   const finalToken = jwt.sign({ id: 1, username: config.username, epoch: tokenEpoch }, JWT_SECRET, { expiresIn: '30d' });
-  res.setHeader('Set-Cookie', authCookie(authToken, undefined, req));
+  res.setHeader('Set-Cookie', authCookie(finalToken, undefined, req));
   res.json({ success: true, token: finalToken, vaultLocked: vault.isLocked() });
 }));
 
