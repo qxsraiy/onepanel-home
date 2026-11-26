@@ -145,6 +145,10 @@ onMounted(load)
 </template>
 <style scoped>
 .about { padding: 2px; }
+/* 段间距：每个 setting-block 之间留 20px */
+.about .setting-block { margin-bottom: 20px; }
+.about .setting-block:last-child { margin-bottom: 2px; }
+.about .setting-block h4 { margin-bottom: 4px; }
 .tip { font-size: 12px; opacity: .55; line-height: 1.75; margin: 6px 0 10px; }
 .tip code { font-family: ui-monospace, monospace; font-size: 11.5px; padding: 1px 5px; border-radius: 4px;
   background: color-mix(in srgb, var(--theme-color) 8%, transparent); }

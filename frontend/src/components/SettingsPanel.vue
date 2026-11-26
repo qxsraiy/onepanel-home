@@ -608,21 +608,6 @@ const handleCloseCheck = async () => {
               <textarea v-model="localSettings.footerText" class="glass-input full-w" rows="4" placeholder="<div style='color:red'>Powered by Me</div>"></textarea>
             </div>
 
-            <div class="setting-block mt-4">
-              <h4><AppIcon icon="mdi:puzzle-outline" /> 浏览器收藏插件</h4>
-              <p style="font-size: 12px; color: color-mix(in srgb, var(--theme-color) 60%, transparent); margin-bottom: 15px;">
-                一键生成已绑定当前面板地址的专属 Chrome/Edge 插件。下载后解压，并在浏览器的“扩展程序”中开启“开发者模式”加载即可。
-              </p>
-              <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); padding: 15px; border-radius: 10px; display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                  <span style="font-weight: bold; color: var(--theme-accent, #3b82f6);">当前绑定地址：</span>
-                  <code style="color: #64ffda; margin-left: 10px;">自动识别</code>
-                </div>
-                <button class="btn-primary" @click="downloadExtension" style="display:flex; align-items:center; gap: 6px;">
-                  <AppIcon icon="mdi:download" /> 下载专属插件包
-                </button>
-              </div>
-            </div>
 
           </div>
 

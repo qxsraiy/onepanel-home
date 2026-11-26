@@ -23,12 +23,33 @@ async function downloadZip() {
     setTimeout(() => URL.revokeObjectURL(url), 3000)
     toast('已下载，解开后按下面的步骤加载', 'success', 5000)
   } catch (e) {
-    toast(e.response?.data?.error || '打包失败', 'error')
+    // responseType=blob 时后端返回的 JSON 错误在 blob 里，读出来才能看到真实原因
+    let msg = '打包失败'
+    try {
+      const blob = e.response?.data
+      if (blob instanceof Blob) {
+        const txt = await blob.text()
+        try { msg = JSON.parse(txt).error || txt.slice(0, 200) } catch { msg = txt.slice(0, 200) || msg }
+      } else if (e.response?.data?.error) {
+        msg = e.response.data.error
+      } else if (e.message) {
+        msg = e.message
+      }
+    } catch { /* 忽略 */ }
+    toast('打包失败：' + msg, 'error', 8000)
   } finally { busy.value = false }
 }
 
-function openExtensionsPage() {
-  window.open('chrome://extensions', '_blank')
+// 浏览器安全限制：网页不能 window.open('chrome://...')，只能让用户复制地址自己打开
+async function copyExtUrl() {
+  const isEdge = navigator.userAgent.includes('Edg/')
+  const url = isEdge ? 'edge://extensions' : 'chrome://extensions'
+  try {
+    await navigator.clipboard.writeText(url)
+    toast('已复制 ' + url + '，粘贴到地址栏打开', 'success', 5000)
+  } catch {
+    toast('请手动在地址栏输入 ' + url, 'warn', 6000)
+  }
 }
 </script>
 
@@ -47,31 +68,6 @@ function openExtensionsPage() {
       </div>
     </div>
 
-    <div class="setting-block warn-block">
-      <h4><AppIcon icon="mdi:shield-lock-outline" /> 关于"点击自动安装"
-      </h4>
-      <p class="tip">
-        <b>浏览器不允许网页自动安装扩展</b>（这是 Chrome / Edge 的安全模型，任何网站都做不到）。
-        想做到"点一下就装"，只有两条路：
-      </p>
-      <div class="path-list">
-        <div class="path-row">
-          <span class="path-tag ok">推荐</span>
-          <div>
-            <b>上架 Edge 加载项商店</b>（免费）或 Chrome Web Store（$5）
-            <div class="path-desc">上架后用户点"获取"→"添加扩展程序"就是一键安装。审核通常 1~3 天。</div>
-          </div>
-        </div>
-        <div class="path-row">
-          <span class="path-tag">现在可用</span>
-          <div>
-            <b>开发者模式拖入</b>（3 步，30 秒）
-            <div class="path-desc">下载 zip → 解压 → 打开 chrome://extensions → 开右上角"开发者模式" → 点"加载已解压的扩展程序" → 选解压出的文件夹。</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <div class="setting-block">
       <h4><AppIcon icon="mdi:format-list-numbered" /> 安装步骤</h4>
       <ol class="steps">
@@ -82,7 +78,10 @@ function openExtensionsPage() {
         <li>点 <b>加载已解压的扩展程序</b>，选中解压出的文件夹</li>
         <li>点扩展图标 → <b>设置节点与账号</b> → 填节点地址 + 在「设置 → API 接口」生成的 Token</li>
       </ol>
-      <button class="btn-outline mt-2" @click="openExtensionsPage">打开扩展管理页</button>
+      <div class="row-actions" style="margin-top:12px">
+        <button class="btn-outline" @click="copyExtUrl">复制扩展管理页地址</button>
+        <span class="tip" style="margin:0">粘贴到地址栏打开（网页不能直接跳 chrome:// 页面）</span>
+      </div>
     </div>
 
     <div class="setting-block">
@@ -99,6 +98,10 @@ function openExtensionsPage() {
 
 <style scoped>
 .ext-pane { padding: 2px; }
+/* 段与段之间留出呼吸感，别紧贴 */
+.ext-pane .setting-block { margin-bottom: 20px; }
+.ext-pane .setting-block:last-child { margin-bottom: 2px; }
+.ext-pane .setting-block h4 { margin-bottom: 4px; }
 .tip { font-size: 12.5px; opacity: .58; line-height: 1.85; margin: 6px 0 10px; }
 .row-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0 4px; }
 .warn-block { border-color: color-mix(in srgb, #f59e0b 35%, transparent) !important;
