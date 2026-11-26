@@ -189,6 +189,11 @@ async function initSystem() {
     if (row?.webauthnRpId) WEBAUTHN_RP_ID_RUNTIME = row.webauthnRpId;
   } catch { /* 列不存在时忽略 */ }
 
+  // 【v3.14.1】如果本地域名配置还是空的，启动后异步向已入网节点要一次
+  if (!COOKIE_DOMAIN || !WEBAUTHN_RP_ID_RUNTIME) {
+    setTimeout(() => { pullNetConfigFromPeers().catch(() => {}); }, 8000);
+  }
+
   syncEngine.init(prisma, itemStore);
   // 【自检修复 BUG-D】收到别人改密码后，本机的旧 JWT 也应失效
   syncEngine.setOnConfigApplied(() => bumpTokenEpoch());
@@ -945,6 +950,59 @@ app.get('/api/net-config', authenticateToken, (req, res) => {
     source: (COOKIE_DOMAIN && process.env.COOKIE_DOMAIN) ? 'env' : (COOKIE_DOMAIN ? 'inherited' : 'unset'),
   });
 });
+
+/**
+ * 从已入网的节点拉取域名配置（v3.14.1）
+ * ------------------------------------------------------------------
+ * 场景：节点在 v3.14.0 之前就入网了，本地 DB/env 都是空。
+ * 这里向所有成员节点发签名请求要 /api/net-config，拿到非空值就写入本地。
+ * 启动时也会自动尝试一次（不阻塞、失败忽略）。
+ */
+async function pullNetConfigFromPeers() {
+  const members = await prisma.member.findMany();
+  const selfId = nodeIdentity.self().nodeId;
+  const { signRequest } = require('./services/syncEngine');
+  const others = members.filter((m) => m.nodeId !== selfId);
+
+  for (const m of others) {
+    const urls = String(m.selfUrls || '').split(',').map((u) => u.trim()).filter(Boolean);
+    for (const base of urls) {
+      try {
+        const url = base.replace(/\/$/, '') + '/api/sync/net-config';
+        const ts = String(Date.now());
+        const sig = signRequest({ ts, method: 'GET', path: '/api/sync/net-config' });
+        const r = await fetch(url, {
+          headers: { 'x-op-node': selfId, 'x-op-ts': ts, 'x-op-sign': sig },
+          signal: AbortSignal.timeout(4000),
+        });
+        if (!r.ok) continue;
+        const d = await r.json();
+        if (d.cookieDomain || d.webauthnRpId) {
+          await prisma.$executeRawUnsafe(
+            'UPDATE AppConfig SET cookieDomain = ?, webauthnRpId = ? WHERE id = 1',
+            d.cookieDomain || null, d.webauthnRpId || null
+          );
+          if (d.cookieDomain) COOKIE_DOMAIN = d.cookieDomain;
+          if (d.webauthnRpId) WEBAUTHN_RP_ID_RUNTIME = d.webauthnRpId;
+          console.log('[net-config] 已从 ' + url + ' 继承域名配置');
+          return { ok: true, from: url, cookieDomain: d.cookieDomain, webauthnRpId: d.webauthnRpId };
+        }
+      } catch { /* 下一台 */ }
+    }
+  }
+  return { ok: false, reason: '没有节点能提供域名配置' };
+}
+
+/** 节点间：暴露本机的域名配置 */
+app.get('/api/sync/net-config', authenticateNode, (req, res) => {
+  res.json({ cookieDomain: COOKIE_DOMAIN || '', webauthnRpId: WEBAUTHN_RP_ID_RUNTIME || '' });
+});
+
+/** 管理员：手动从网络拉取域名配置 */
+app.post('/api/net-config/pull', authenticateToken, ah(async (req, res) => {
+  const result = await pullNetConfigFromPeers();
+  res.json(result);
+}));
 
 /** 节点列表与同步状态（需登录） */
 app.get('/api/sync/status', authenticateToken, ah(async (req, res) => {

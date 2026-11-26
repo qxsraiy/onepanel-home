@@ -1,6 +1,6 @@
 {
   "name": "onepanel-backend",
-  "version": "3.14.0",
+  "version": "3.14.1",
   "description": "OnePanel 个人数字枢纽后端（Express + Prisma/SQLite）",
   "main": "index.js",
   "scripts": {

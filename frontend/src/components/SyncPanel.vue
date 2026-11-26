@@ -33,6 +33,22 @@ let joinReqTimer = null
 // 【全网节点状态】鼠标悬停节点时显示该节点的 CPU/内存/磁盘
 // 网络域名配置（入网时自动继承）
 const netConfig = ref(null)
+const pulling = ref(false)
+async function pullNetConfig() {
+  pulling.value = true
+  try {
+    const { data } = await axios.post('/api/net-config/pull')
+    if (data.ok) {
+      toast('已从网络继承：' + data.cookieDomain + ' / ' + data.webauthnRpId, 'success', 6000)
+      await loadNetConfig()
+    } else {
+      toast(data.reason || '没有节点能提供配置', 'warn', 6000)
+    }
+  } catch (e) {
+    toast(e.response?.data?.error || '拉取失败', 'error')
+  } finally { pulling.value = false }
+}
+
 async function loadNetConfig() {
   try { const { data } = await axios.get('/api/net-config'); netConfig.value = data } catch { netConfig.value = null }
 }
@@ -336,9 +352,19 @@ onMounted(load);
         <div class="cfg-row"><span>Passkey RP ID</span><b>{{ netConfig.webauthnRpId || '—' }}</b></div>
         <div class="cfg-row"><span>来源</span><b>{{ netConfig.source === 'inherited' ? '入网时自动继承' : (netConfig.source === 'env' ? '环境变量' : '未设置') }}</b></div>
         <p class="tip">加新节点不用改这里——新节点入网时会自动继承，老节点不受影响。</p>
+        <div class="row-actions" style="margin-top:8px">
+          <button class="btn-outline" :disabled="pulling" @click="pullNetConfig">
+            {{ pulling ? '拉取中…' : '从网络重新拉取' }}
+          </button>
+        </div>
       </template>
       <template v-else>
-        <p class="tip warn-text">⚠️ 还没配置。如果你有多个节点要用同一个登录态和 Passkey，需要在 <code>onepanel.env</code> 里设 <code>COOKIE_DOMAIN=.你的父域</code> 和 <code>WEBAUTHN_RP_ID=你的父域</code>，然后重启。</p>
+        <p class="tip warn-text">⚠️ 还没配置。这台是第一台节点的话，需要在 <code>onepanel.env</code> 里设 <code>COOKIE_DOMAIN=.你的父域</code> 和 <code>WEBAUTHN_RP_ID=你的父域</code>，然后重启。</p>
+        <div class="row-actions" style="margin-top:8px">
+          <button class="btn-outline" :disabled="pulling" @click="pullNetConfig">
+            {{ pulling ? '拉取中…' : '从其他节点自动拉取' }}
+          </button>
+        </div>
       </template>
     </div>
 
