@@ -58,43 +58,64 @@ GITEE_BASE="https://gitee.com/a1225/onepanel-home"
 MIRROR_PUBLIC=("https://ghfast.top" "https://gh-proxy.com" "https://ghproxy.net")
 ACTIVE_MIRROR=""
 
+# ---------- 网络环境探测（决定下载优先级）----------
+# 不需要用户区分国内外：脚本自己判断。
+#   国内：Gitee / down.xtay.cn 更快
+#   海外：GitHub 直连更快
+# 判断依据：4 秒内能否访问 gitee.com（国内基本秒开，海外一般慢于 1 秒）
+NET_REGION="unknown"
+if curl --http1.1 -fsSL --connect-timeout 2 --max-time 4 -o /dev/null "https://gitee.com" 2>/dev/null; then
+  NET_REGION="cn"
+else
+  NET_REGION="global"
+fi
+
 # 把 github 系 URL 转成候选镜像地址，逐个尝试
 gh_fetch() {
   local url="$1" out="$2" tmo="${3:-30}" try m
-  local -a tries=()
+  local -a cn_tries=()   # 国内优先序列
+  local -a gl_tries=()   # 海外优先序列
 
-  # ① 自建镜像：域名替换式
+  # 各源的候选地址（三种规则）
   case "$url" in
     https://github.com/*)
-      tries+=("${MIRROR_SELF%/}/${url#https://github.com/}")
-      # Gitee：github.com/owner/repo/xxx -> gitee.com/a1225/onepanel-home/xxx
+      cn_tries+=("${MIRROR_SELF%/}/${url#https://github.com/}")
+      gl_tries+=("${MIRROR_SELF%/}/${url#https://github.com/}")
       case "$url" in
         https://github.com/qxsraiy/onepanel-home/*)
-          tries+=("${GITEE_BASE}/${url#https://github.com/qxsraiy/onepanel-home/}")
+          cn_tries+=("${GITEE_BASE}/${url#https://github.com/qxsraiy/onepanel-home/}")
+          gl_tries+=("${GITEE_BASE}/${url#https://github.com/qxsraiy/onepanel-home/}")
           ;;
       esac
       ;;
     https://api.github.com/*)
-      tries+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}")
+      cn_tries+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}")
+      gl_tries+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}")
       ;;
     https://raw.githubusercontent.com/*)
-      tries+=("${MIRROR_SELF%/}/raw/${url#https://raw.githubusercontent.com/}")
+      cn_tries+=("${MIRROR_SELF%/}/raw/${url#https://raw.githubusercontent.com/}")
+      gl_tries+=("${MIRROR_SELF%/}/raw/${url#https://raw.githubusercontent.com/}")
       ;;
   esac
 
-  # ② 公共镜像：前缀拼接式
-  for m in "${MIRROR_PUBLIC[@]}"; do
-    tries+=("${m%/}/${url}")
-  done
+  # 公共镜像：两个环境都作为中间候选
+  local -a pub=()
+  for m in "${MIRROR_PUBLIC[@]}"; do pub+=("${m%/}/${url}"); done
 
-  # ③ 直连
-  tries+=("$url")
+  local -a tries=()
+  if [ "$NET_REGION" = "cn" ]; then
+    # 国内：自建/Gitee 优先 -> 公共镜像 -> 直连 GitHub 兜底
+    tries=("${cn_tries[@]}" "${pub[@]}" "$url")
+  else
+    # 海外：GitHub 直连优先 -> 公共镜像 -> 自建/Gitee 兜底
+    tries=("$url" "${pub[@]}" "${gl_tries[@]}")
+  fi
 
   for try in "${tries[@]}"; do
     if curl --http1.1 -fsSL --connect-timeout 10 --max-time "$tmo" -o "$out" "$try" 2>/dev/null; then
       case "$try" in
         "$url") ACTIVE_MIRROR="" ;;
-        *) ACTIVE_MIRROR="$try"; log "走镜像：$try" ;;
+        *) ACTIVE_MIRROR="$try"; log "下载源：$try" ;;
       esac
       return 0
     fi
@@ -102,34 +123,29 @@ gh_fetch() {
   return 1
 }
 
-# 直连探测：海外服务器直连更快，国内需要镜像。先测直连能否 3 秒内通
-GH_DIRECT_OK=0
-if curl --http1.1 -fsSL --connect-timeout 3 --max-time 5 -H "User-Agent: onepanel-installer" -o /dev/null "https://api.github.com/rate_limit" 2>/dev/null; then
-  GH_DIRECT_OK=1
-fi
-
-# 文本读取（API 查询）：按 GH_DIRECT_OK 决定顺序，且必须校验内容
+# 文本读取（API 查询）：同样按 NET_REGION 排序，且必须校验内容
 gh_text() {
-  local url="$1" try r
-  local -a tries=()
-  local -a mirrors=()
+  local url="$1" try r m
+  local -a cn=() gl=() pub=() tries=()
   case "$url" in
-    https://api.github.com/*) mirrors+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}") ;;
-    https://github.com/*) mirrors+=("${MIRROR_SELF%/}/${url#https://github.com/}") ;;
+    https://api.github.com/*)
+      cn+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}")
+      gl+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}")
+      ;;
+    https://github.com/*)
+      cn+=("${MIRROR_SELF%/}/${url#https://github.com/}")
+      gl+=("${MIRROR_SELF%/}/${url#https://github.com/}")
+      ;;
   esac
-  for m in "${MIRROR_PUBLIC[@]}"; do mirrors+=("${m%/}/${url}"); done
+  for m in "${MIRROR_PUBLIC[@]}"; do pub+=("${m%/}/${url}"); done
 
-  # 直连优先（海外）；否则镜像优先（国内）
-  if [ "$GH_DIRECT_OK" -eq 1 ]; then
-    tries+=("$url")
-    for try in "${mirrors[@]}"; do tries+=("$try"); done
+  if [ "$NET_REGION" = "cn" ]; then
+    tries=("${cn[@]}" "${pub[@]}" "$url")
   else
-    for try in "${mirrors[@]}"; do tries+=("$try"); done
-    tries+=("$url")
+    tries=("$url" "${pub[@]}" "${gl[@]}")
   fi
 
   for try in "${tries[@]}"; do
-    # -f 会拒绝 4xx/5xx；再额外校验内容，避免镜像返回 HTML 首页被当成功
     r="$(curl --http1.1 -fsSL --connect-timeout 10 --max-time 25 -H "User-Agent: onepanel-installer" -H "Accept: application/vnd.github+json" "$try" 2>/dev/null)" || continue
     # 用 case 匹配，避免 printf|grep -q 在 pipefail 下被 SIGPIPE 误判为失败
     case "$r" in

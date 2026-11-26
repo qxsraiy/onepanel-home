@@ -29,55 +29,55 @@ MIRROR_SELF="${OP_MIRROR:-https://down.xtay.cn}"
 GITEE_BASE="https://gitee.com/a1225/onepanel-home"
 MIRROR_PUBLIC=("https://ghfast.top" "https://gh-proxy.com" "https://ghproxy.net")
 
+# 网络环境探测：国内走 Gitee/自建，海外走 GitHub，用户不用区分
+NET_REGION="unknown"
+if curl --http1.1 -fsSL --connect-timeout 2 --max-time 4 -o /dev/null "https://gitee.com" 2>/dev/null; then
+  NET_REGION="cn"
+else
+  NET_REGION="global"
+fi
+
 gh_fetch() {
   local url="$1" out="$2" tmo="${3:-60}" try m
-  local -a tries=()
+  local -a cn=() gl=() pub=() tries=()
   case "$url" in
     https://github.com/*)
-      tries+=("${MIRROR_SELF%/}/${url#https://github.com/}")
+      cn+=("${MIRROR_SELF%/}/${url#https://github.com/}")
+      gl+=("${MIRROR_SELF%/}/${url#https://github.com/}")
       case "$url" in
         https://github.com/qxsraiy/onepanel-home/*)
-          tries+=("${GITEE_BASE}/${url#https://github.com/qxsraiy/onepanel-home/}")
+          cn+=("${GITEE_BASE}/${url#https://github.com/qxsraiy/onepanel-home/}")
+          gl+=("${GITEE_BASE}/${url#https://github.com/qxsraiy/onepanel-home/}")
           ;;
       esac
       ;;
-    https://api.github.com/*) tries+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}") ;;
+    https://api.github.com/*)
+      cn+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}")
+      gl+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}")
+      ;;
   esac
-  for m in "${MIRROR_PUBLIC[@]}"; do tries+=("${m%/}/${url}"); done
-  tries+=("$url")
+  for m in "${MIRROR_PUBLIC[@]}"; do pub+=("${m%/}/${url}"); done
+  if [ "$NET_REGION" = "cn" ]; then tries=("${cn[@]}" "${pub[@]}" "$url"); else tries=("$url" "${pub[@]}" "${gl[@]}"); fi
   for try in "${tries[@]}"; do
     if curl --http1.1 -fsSL --connect-timeout 10 --max-time "$tmo" -o "$out" "$try" 2>/dev/null; then
-      [ "$try" != "$url" ] && log "走镜像：$try"
+      [ "$try" != "$url" ] && log "下载源：$try"
       return 0
     fi
   done
   return 1
 }
 
-# 直连探测：海外直连优先，国内镜像优先
-GH_DIRECT_OK=0
-if curl --http1.1 -fsSL --connect-timeout 3 --max-time 5 -H "User-Agent: onepanel-upgrader" -o /dev/null "https://api.github.com/rate_limit" 2>/dev/null; then
-  GH_DIRECT_OK=1
-fi
-
 gh_text() {
   local url="$1" try r m
-  local -a tries=()
-  local -a mirrors=()
+  local -a cn=() gl=() pub=() tries=()
   case "$url" in
-    https://api.github.com/*) mirrors+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}") ;;
-    https://github.com/*) mirrors+=("${MIRROR_SELF%/}/${url#https://github.com/}") ;;
+    https://api.github.com/*)
+      cn+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}")
+      gl+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}")
+      ;;
   esac
-  for m in "${MIRROR_PUBLIC[@]}"; do mirrors+=("${m%/}/${url}"); done
-
-  if [ "$GH_DIRECT_OK" -eq 1 ]; then
-    tries+=("$url")
-    for try in "${mirrors[@]}"; do tries+=("$try"); done
-  else
-    for try in "${mirrors[@]}"; do tries+=("$try"); done
-    tries+=("$url")
-  fi
-
+  for m in "${MIRROR_PUBLIC[@]}"; do pub+=("${m%/}/${url}"); done
+  if [ "$NET_REGION" = "cn" ]; then tries=("${cn[@]}" "${pub[@]}" "$url"); else tries=("$url" "${pub[@]}" "${gl[@]}"); fi
   for try in "${tries[@]}"; do
     r="$(curl --http1.1 -fsSL --connect-timeout 10 --max-time 25 -H "User-Agent: onepanel-upgrader" -H "Accept: application/vnd.github+json" "$try" 2>/dev/null)" || continue
     case "$r" in
