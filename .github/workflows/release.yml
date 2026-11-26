@@ -48,7 +48,10 @@ jobs:
           mkdir -p "dist/$OUT"
           cp -r backend "dist/$OUT/backend"
           cp -r shared "dist/$OUT/shared" 2>/dev/null || true
-          cp start.sh upgrade.sh install.sh "dist/$OUT/" 2>/dev/null || true
+          cp start.sh upgrade.sh install.sh manage.sh "dist/$OUT/" 2>/dev/null || true
+          # schema.sql 必须进包，否则新库建不了表
+          mkdir -p "dist/$OUT/backend/bin"
+          cp backend/bin/schema.sql "dist/$OUT/backend/bin/schema.sql" 2>/dev/null || true
           rm -rf "dist/$OUT/backend/node_modules/.bin"
           rm -f "dist/$OUT/backend/prisma/"*.db
           echo "$VER" > "dist/$OUT/.version"

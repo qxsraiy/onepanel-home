@@ -405,7 +405,17 @@ fi
 
 # ---------- 9. 注册 systemd ----------
 if [[ "$USE_SYSTEMD" -eq 1 ]] && command -v systemctl >/dev/null; then
-  cat > /etc/systemd/system/onepanel.service <<EOF
+  NODE_FOR_SYSTEMD="$(command -v node || true)"
+if [ -x "${INSTALL_DIR}/runtime/node/bin/node" ]; then
+  NODE_FOR_SYSTEMD="${INSTALL_DIR}/runtime/node/bin/node"
+fi
+if [ -z "$NODE_FOR_SYSTEMD" ]; then
+  err "找不到可用的 node，无法注册 systemd"
+  exit 1
+fi
+log "systemd 将使用：$NODE_FOR_SYSTEMD"
+
+cat > /etc/systemd/system/onepanel.service <<EOF
 [Unit]
 Description=OnePanel 个人数字枢纽
 After=network.target
@@ -414,7 +424,7 @@ After=network.target
 Type=simple
 WorkingDirectory=${INSTALL_DIR}/current/backend
 EnvironmentFile=${INSTALL_DIR}/onepanel.env
-ExecStart=/usr/bin/env bash ${INSTALL_DIR}/current/manage.sh start-fg
+ExecStart=${NODE_FOR_SYSTEMD} index.js
 Restart=always
 RestartSec=5
 LimitNOFILE=65535
