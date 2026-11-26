@@ -97,7 +97,6 @@ async function loadAccount() {
 // 三个区块的折叠状态
 const showInviteBlock = ref(true)
 const showNetConfigBlock = ref(false)
-const showTopoBlock = ref(false)
 
 const selfUrlHint = computed(() => {
   if (typeof window === 'undefined') return 'https://你的域名'
@@ -334,6 +333,17 @@ onMounted(load);
 
 <template>
   <div class="sync-pane">
+    <!-- ===== 网络拓扑（固定在最上方，不折叠）===== -->
+    <div class="setting-block topo-block">
+      <NetworkTopology
+        :node-id="status?.nodeId || ''"
+        :node-name="status?.nodeName || ''"
+        :members="otherMembers"
+        :stats="nodeStatsMap"
+        @pick="highlightMember"
+      />
+    </div>
+
     <!-- ===== 邀请新设备（账号密码 + 人工批准）===== -->
     <div class="setting-block">
       <button class="fold-head" @click="showInviteBlock = !showInviteBlock">
@@ -433,23 +443,6 @@ onMounted(load);
       </template>
     </div>
       </div>
-    <!-- ===== 网络拓扑 ===== -->
-    <div class="setting-block">
-      <button class="fold-head" @click="showTopoBlock = !showTopoBlock">
-        <AppIcon icon="mdi:lan-connect" />
-        <span>网络拓扑</span>
-        <AppIcon :icon="showTopoBlock ? 'mdi:chevron-up' : 'mdi:chevron-down'" class="fold-arrow" />
-      </button>
-      <div v-if="showTopoBlock" class="fold-body">
-        <NetworkTopology
-          :node-id="status?.nodeId || ''"
-          :node-name="status?.nodeName || ''"
-          :members="otherMembers"
-          :stats="nodeStatsMap"
-          @pick="highlightMember"
-        />
-      </div>
-    </div>
 
     <!-- ===== 折叠：已加入的设备 ===== -->
     <div class="setting-block">
@@ -560,6 +553,8 @@ onMounted(load);
 
 <style scoped>
 .sync-pane { padding: 2px; }
+/* 网络拓扑固定顶部，不折叠，上下留一点呼吸 */
+.topo-block { margin-bottom: 14px; padding: 4px 2px; }
 .member-row { position: relative; }
 .self-row { opacity: .72; }
 .cfg-edit { display: flex; flex-direction: column; gap: 4px; }

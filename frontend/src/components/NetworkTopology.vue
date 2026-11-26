@@ -88,7 +88,7 @@ const hoverInfo = computed(() => {
     name: h.label || '',
     online: h.status === 'active',
     self: !!h.self,
-    urls: h.selfUrls || '',
+    urls: h.selfUrls || (h.self ? '（本机，无需地址）' : ''),
     version: st && st.version ? 'v' + st.version : '',
     cpu: st && st.cpu && st.cpu.usage !== undefined ? st.cpu.usage + '%' + (st.cpu.cores ? '（' + st.cpu.cores + ' 核）' : '') : '',
     mem: st && st.mem && st.mem.total ? g(st.mem.used) + ' / ' + g(st.mem.total) + ' GB（' + st.mem.percent + '%）' : '',
@@ -112,7 +112,7 @@ const orbit = computed(() => radius.value);
 </script>
 
 <template>
-  <div class="topo-card">
+  <div class="topo-card topo-wrap">
     <svg :viewBox="`0 0 ${W} ${H}`" class="topo-svg" role="img" aria-label="网络拓扑">
       <defs>
         <radialGradient id="topoSelfGlow">
@@ -173,7 +173,7 @@ const orbit = computed(() => radius.value);
       </text>
     </svg>
 
-    <!-- ⑦ 内置浮条：悬停节点显示该节点的完整状态 -->
+    <!-- ⑦ 内置浮条：悬停节点显示状态，绝对定位不推挤布局 -->
     <div class="topo-tip" :class="{ show: !!hoverInfo, off: hoverInfo && !hoverInfo.online }">
       <template v-if="hoverInfo">
         <div class="tt-head">
@@ -191,8 +191,8 @@ const orbit = computed(() => radius.value);
         <div v-else-if="hoverInfo.error" class="tt-err">{{ hoverInfo.error }}</div>
         <div v-if="hoverInfo.lastSync" class="tt-sync">{{ hoverInfo.lastSync }}</div>
       </template>
-      <span v-else class="tt-idle">悬停节点查看状态</span>
     </div>
+    <div v-if="!hoverInfo" class="topo-idle">悬停节点查看状态</div>
 
     <!-- ⑧ 图例收进角落 -->
     <div class="topo-legend">
@@ -248,13 +248,24 @@ const orbit = computed(() => radius.value);
 .tt-err { font-size: 11px; color: #f87171; opacity: .9; }
 .tt-sync { font-size: 10.5px; opacity: .4; margin-top: 4px; }
 .tt-idle { font-size: 11.5px; opacity: .55; }
+/* 【v3.25.0】浮条绝对定位：出现/消失都不推挤拓扑图，节点位置永远不动 */
+.topo-wrap { position: relative; }
 .topo-tip {
-  margin-top: 4px; text-align: center; font-size: 10.5px;
-  color: var(--theme-color); opacity: .42;
-  min-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  transition: opacity .16s ease;
+  position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
+  min-width: 200px; max-width: 92%; padding: 9px 12px; border-radius: 10px;
+  background: color-mix(in srgb, var(--theme-bg, #0f172a) 90%, transparent);
+  border: 1px solid color-mix(in srgb, var(--theme-color) 14%, transparent);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 12px 30px -8px rgba(0,0,0,.55);
+  font-size: 11.5px; line-height: 1.6; text-align: left;
+  color: var(--theme-color);
+  opacity: 0; pointer-events: none; z-index: 20;
+  transition: opacity .14s ease;
 }
-.topo-tip.show { opacity: .72; }
+.topo-tip.show { opacity: 1; }
+/* 未悬停时的提示语（很小，占原来那一行的高度） */
+.topo-idle { margin-top: 4px; text-align: center; font-size: 10.5px;
+  color: var(--theme-color); opacity: .42; min-height: 15px; }
 
 .topo-legend { display: flex; gap: 12px; justify-content: center; font-size: 10px; opacity: .45; padding-bottom: 2px; }
 .topo-legend .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 3px; vertical-align: middle; }

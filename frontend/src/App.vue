@@ -133,6 +133,80 @@ const handleLogin = async () => {
   }
 }
 
+/** 用通行密钥登录（跳过 2FA，因为指纹本身就是强认证） */
+const passkeyBusy = ref(false)
+
+function _b64urlToBuf(s) {
+  if (s instanceof ArrayBuffer) return s
+  if (s instanceof Uint8Array) return s.buffer.slice(s.byteOffset, s.byteOffset + s.byteLength)
+  if (s && typeof s === 'object' && Array.isArray(s.data)) return new Uint8Array(s.data).buffer
+  const str = String(s || '')
+  const pad = str.length % 4 ? 4 - (str.length % 4) : 0
+  const bin = atob((str + '='.repeat(pad)).replace(/-/g, '+').replace(/_/g, '/'))
+  const buf = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i += 1) buf[i] = bin.charCodeAt(i)
+  return buf.buffer
+}
+function _bufToB64url(buf) {
+  const b = new Uint8Array(buf)
+  let s = ''
+  for (let i = 0; i < b.length; i += 1) s += String.fromCharCode(b[i])
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+function _normalizeExtensions(ext) {
+  if (!ext || typeof ext !== 'object') return null
+  const out = JSON.parse(JSON.stringify(ext))
+  const first = out?.prf?.eval?.first
+  if (first !== undefined && first !== null) {
+    try { out.prf.eval.first = _b64urlToBuf(first) } catch { delete out.prf.eval.first }
+  }
+  return out
+}
+
+const handlePasskeyLogin = async () => {
+  if (!window.PublicKeyCredential) return toast('当前浏览器不支持通行密钥', 'warn')
+  passkeyBusy.value = true
+  try {
+    const { data } = await axios.get('/api/passkey/login/options')
+    const o = data.options
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        challenge: _b64urlToBuf(o.challenge),
+        rpId: o.rpId,
+        timeout: o.timeout || 60000,
+        userVerification: o.userVerification || 'preferred',
+        ...(_normalizeExtensions(o.extensions) ? { extensions: _normalizeExtensions(o.extensions) } : {}),
+        allowCredentials: (o.allowCredentials || []).map((c) => ({ id: _b64urlToBuf(c.id), type: c.type })),
+      },
+    })
+    if (!assertion) return
+    const response = {
+      id: assertion.id,
+      rawId: _bufToB64url(assertion.rawId),
+      type: assertion.type,
+      response: {
+        clientDataJSON: _bufToB64url(assertion.response.clientDataJSON),
+        authenticatorData: _bufToB64url(assertion.response.authenticatorData),
+        signature: _bufToB64url(assertion.response.signature),
+        userHandle: assertion.response.userHandle ? _bufToB64url(assertion.response.userHandle) : null,
+      },
+      clientExtensionResults: assertion.getClientExtensionResults ? assertion.getClientExtensionResults() : {},
+    }
+    const ext = assertion.getClientExtensionResults ? assertion.getClientExtensionResults() : {}
+    const prfFirst = ext?.prf?.results?.first
+    const { data: r } = await axios.post('/api/passkey/login/verify', {
+      response, challengeKey: data.challengeKey,
+      prfOutput: prfFirst ? _bufToB64url(prfFirst) : null,
+    })
+    saveToken(r.token)
+    isLoggedIn.value = true
+    afterLogin()
+  } catch (e) {
+    const msg = e?.response?.data?.error || e.message || '通行密钥登录失败'
+    toast('通行密钥登录失败：' + msg, 'error', 6000)
+  } finally { passkeyBusy.value = false }
+}
+
 const handleVerify2FA = async () => {
   if (!totpCode.value || totpCode.value.length !== 6) return toast('请输入 6 位动态验证码', 'warn')
   try {
