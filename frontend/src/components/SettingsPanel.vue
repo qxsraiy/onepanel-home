@@ -573,9 +573,10 @@ const handleCloseCheck = async () => {
               </div>
               <div class="form-row mt-3">
                 <div class="flex-1">
-                  <label>主题强调色（按钮、选中态、卡片光晕）</label>
+                  <label>主题强调色</label>
                   <input v-model="localSettings.themeAccent" type="color" class="color-picker" />
                 </div>
+                <div class="flex-1"></div>
               </div>
               <div class="action-row mt-3" style="flex-wrap: wrap;">
                 <button class="btn-outline" style="color:#000; background:#f8fafc" @click="setLocalTheme('#f8fafc', '#1e293b')">☀️ 预览白昼模式</button>
