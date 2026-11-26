@@ -38,7 +38,7 @@ gh_fetch() {
   for m in "${MIRROR_PUBLIC[@]}"; do tries+=("${m%/}/${url}"); done
   tries+=("$url")
   for try in "${tries[@]}"; do
-    if curl -fsSL --connect-timeout 10 --max-time "$tmo" -o "$out" "$try" 2>/dev/null; then
+    if curl --http1.1 -fsSL --connect-timeout 10 --max-time "$tmo" -o "$out" "$try" 2>/dev/null; then
       [ "$try" != "$url" ] && log "走镜像：$try"
       return 0
     fi
@@ -46,24 +46,42 @@ gh_fetch() {
   return 1
 }
 
+# 直连探测：海外直连优先，国内镜像优先
+GH_DIRECT_OK=0
+if curl --http1.1 -fsSL --connect-timeout 3 --max-time 4 -o /dev/null "https://api.github.com/rate_limit" 2>/dev/null; then
+  GH_DIRECT_OK=1
+fi
+
 gh_text() {
   local url="$1" try r m
   local -a tries=()
+  local -a mirrors=()
   case "$url" in
-    https://api.github.com/*) tries+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}") ;;
-    https://github.com/*) tries+=("${MIRROR_SELF%/}/${url#https://github.com/}") ;;
+    https://api.github.com/*) mirrors+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}") ;;
+    https://github.com/*) mirrors+=("${MIRROR_SELF%/}/${url#https://github.com/}") ;;
   esac
-  for m in "${MIRROR_PUBLIC[@]}"; do tries+=("${m%/}/${url}"); done
-  tries+=("$url")
+  for m in "${MIRROR_PUBLIC[@]}"; do mirrors+=("${m%/}/${url}"); done
+
+  if [ "$GH_DIRECT_OK" -eq 1 ]; then
+    tries+=("$url")
+    for try in "${mirrors[@]}"; do tries+=("$try"); done
+  else
+    for try in "${mirrors[@]}"; do tries+=("$try"); done
+    tries+=("$url")
+  fi
+
   for try in "${tries[@]}"; do
-    r="$(curl -fsSL --connect-timeout 10 --max-time 25 "$try" 2>/dev/null)" && { echo "$r"; return 0; }
+    r="$(curl --http1.1 -fsSL --connect-timeout 10 --max-time 25 "$try" 2>/dev/null)" || continue
+    printf '%s' "$r" | grep -q '"tag_name"' || continue
+    printf '%s' "$r"
+    return 0
   done
   return 1
 }
 gh_text() {
   local url="$1" m r
   for m in "${MIRRORS[@]}"; do
-    r="$(curl -fsSL --connect-timeout 10 --max-time 25 "${m}${url}" 2>/dev/null)" && { echo "$r"; return 0; }
+    r="$(curl --http1.1 -fsSL --connect-timeout 10 --max-time 25 "${m}${url}" 2>/dev/null)" && { echo "$r"; return 0; }
   done
   return 1
 }

@@ -5,7 +5,7 @@
 #  之后所有管理操作都在这个菜单里（升级/卸载/改端口/状态/日志/回滚/自动更新）
 # ----------------------------------------------------------------------
 #  用法：
-#    curl -fsSL https://raw.githubusercontent.com/qxsraiy/onepanel-home/main/op.sh -o /root/op.sh
+#    curl --http1.1 -fsSL https://raw.githubusercontent.com/qxsraiy/onepanel-home/main/op.sh -o /root/op.sh
 #    bash /root/op.sh
 #  参数模式：
 #    bash /root/op.sh --port 5266 --dir /opt/onepanel --auto-update
@@ -83,7 +83,7 @@ gh_fetch() {
   tries+=("$url")
 
   for try in "${tries[@]}"; do
-    if curl -fsSL --connect-timeout 10 --max-time "$tmo" -o "$out" "$try" 2>/dev/null; then
+    if curl --http1.1 -fsSL --connect-timeout 10 --max-time "$tmo" -o "$out" "$try" 2>/dev/null; then
       case "$try" in
         "$url") ACTIVE_MIRROR="" ;;
         *) ACTIVE_MIRROR="$try"; log "走镜像：$try" ;;
@@ -94,18 +94,41 @@ gh_fetch() {
   return 1
 }
 
-# 文本读取（API 查询）：同样走镜像
+# 直连探测：海外服务器直连更快，国内需要镜像。先测直连能否 3 秒内通
+GH_DIRECT_OK=0
+if curl --http1.1 -fsSL --connect-timeout 3 --max-time 5 -o /dev/null "https://api.github.com/rate_limit" 2>/dev/null; then
+  GH_DIRECT_OK=1
+fi
+
+# 文本读取（API 查询）：按 GH_DIRECT_OK 决定顺序，且必须校验内容
 gh_text() {
   local url="$1" try r
   local -a tries=()
+  local -a mirrors=()
   case "$url" in
-    https://api.github.com/*) tries+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}") ;;
-    https://github.com/*) tries+=("${MIRROR_SELF%/}/${url#https://github.com/}") ;;
+    https://api.github.com/*) mirrors+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}") ;;
+    https://github.com/*) mirrors+=("${MIRROR_SELF%/}/${url#https://github.com/}") ;;
   esac
-  for m in "${MIRROR_PUBLIC[@]}"; do tries+=("${m%/}/${url}"); done
-  tries+=("$url")
+  for m in "${MIRROR_PUBLIC[@]}"; do mirrors+=("${m%/}/${url}"); done
+
+  # 直连优先（海外）；否则镜像优先（国内）
+  if [ "$GH_DIRECT_OK" -eq 1 ]; then
+    tries+=("$url")
+    for try in "${mirrors[@]}"; do tries+=("$try"); done
+  else
+    for try in "${mirrors[@]}"; do tries+=("$try"); done
+    tries+=("$url")
+  fi
+
   for try in "${tries[@]}"; do
-    r="$(curl -fsSL --connect-timeout 10 --max-time 25 "$try" 2>/dev/null)" && { echo "$r"; return 0; }
+    # -f 会拒绝 4xx/5xx；再额外校验内容，避免镜像返回 HTML 首页被当成功
+    r="$(curl --http1.1 -fsSL --connect-timeout 10 --max-time 25 "$try" 2>/dev/null)" || continue
+    case "$url" in
+      *releases/latest*) printf '%s' "$r" | grep -q '"tag_name"' || continue ;;
+      *releases?per_page*|*releases$*) printf '%s' "$r" | grep -q 'tag_name' || continue ;;
+    esac
+    printf '%s' "$r"
+    return 0
   done
   return 1
 }
@@ -114,7 +137,7 @@ gh_text() {
 gh_text() {
   local url="$1" m r
   for m in "${GITHUB_MIRRORS[@]}"; do
-    r="$(curl -fsSL --connect-timeout 10 --max-time 25 "${m}${url}" 2>/dev/null)" && { echo "$r"; return 0; }
+    r="$(curl --http1.1 -fsSL --connect-timeout 10 --max-time 25 "${m}${url}" 2>/dev/null)" && { echo "$r"; return 0; }
   done
   return 1
 }
@@ -418,7 +441,7 @@ else
   log "系统没有 Node 18+，自动下载官方 Node $NODE_WANT（$ARCH_TAG）…"
   NODE_TARBALL="node-v${NODE_WANT}-${ARCH_TAG}.tar.xz"
   NODE_URL="https://nodejs.org/dist/v${NODE_WANT}/${NODE_TARBALL}"
-  if ! curl -fL --max-time 300 -o "$RUNTIME_DIR/node.tar.xz" "$NODE_URL"; then
+  if ! curl --http1.1 -fL --max-time 300 -o "$RUNTIME_DIR/node.tar.xz" "$NODE_URL"; then
     err "下载 Node 失败：$NODE_URL"
     err "也可以自己先装 Node 18+ 后重跑本脚本，或用 Docker 部署"
     exit 1
@@ -447,7 +470,16 @@ else
   RESP="$(gh_text "$API" || true)"
   if [ -z "$RESP" ]; then
     err "无法访问 GitHub（直连与镜像均失败）"
-    err "解决：① GH_PROXY=https://ghfast.top bash op.sh   ② 手动下载后用 --pkg 指定"
+    echo "" >&2
+    echo "  ── 诊断 ──" >&2
+    echo "  直连 HTTP/1.1：$(curl --http1.1 -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 8 https://api.github.com/rate_limit 2>/dev/null || echo 失败)" >&2
+    echo "  直连 HTTP/2：  $(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 8 https://api.github.com/rate_limit 2>/dev/null || echo 失败)" >&2
+    echo "  DNS：$(getent hosts api.github.com 2>/dev/null | head -1 || echo '解析失败')" >&2
+    echo "  curl 版本：$(curl --version 2>/dev/null | head -1)" >&2
+    echo "" >&2
+    echo "  解决：① 美国/海外服务器直连通常可用，检查是否被防火墙拦" >&2
+    echo "        ② 国内服务器：OP_MIRROR=https://down.xtay.cn bash op.sh" >&2
+    echo "        ③ 实在不行：手动下载包后用 --pkg 指定" >&2
     exit 1
   fi
   if echo "$RESP" | grep -q "Not Found"; then
@@ -488,7 +520,7 @@ if [ -n "${LOCAL_PKG:-}" ]; then
   cp "$LOCAL_PKG" "$TMP/pkg.tar.gz" || { err "无法读取本地包"; exit 1; }
 elif [ -n "${PKG_URL:-}" ]; then
   log "从指定地址下载：$PKG_URL"
-  curl -fL --connect-timeout 15 --max-time 1800 -o "$TMP/pkg.tar.gz" "$PKG_URL" || {
+  curl --http1.1 -fL --connect-timeout 15 --max-time 1800 -o "$TMP/pkg.tar.gz" "$PKG_URL" || {
     err "指定地址下载失败：$PKG_URL"; exit 1; }
 else
   gh_fetch "$URL" "$TMP/pkg.tar.gz" 600 || { err "下载失败：$URL"
