@@ -313,8 +313,14 @@ async function applyChange(change) {
           // 必须像 index.js 一样用 raw SQL 单独写；其余字段走 Prisma。
           // bgImage 不同步（体积大，各节点各自设）
           const patch = {};
-          for (const k of ['themeBg', 'themeColor', 'siteIcon', 'siteTitle', 'footerText']) {
+          // 【v3.27.0】原来漏了 cardBgColor / cardBgOpacity —— 后端广播了但这里不处理，
+          // 导致"统一卡片样式预设"改了不跟着同步。
+          for (const k of ['themeBg', 'themeColor', 'siteIcon', 'siteTitle', 'footerText', 'cardBgColor']) {
             if (data[k] !== undefined) patch[k] = data[k];
+          }
+          if (data.cardBgOpacity !== undefined) {
+            const n = Number(data.cardBgOpacity);
+            if (Number.isFinite(n)) patch.cardBgOpacity = Math.min(1, Math.max(0, n));
           }
           if (Object.keys(patch).length) {
             await db().appConfig.update({ where: { id: 1 }, data: patch });

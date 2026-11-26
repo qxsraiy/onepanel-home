@@ -706,27 +706,6 @@ const SEARCH_ENGINES = {
 }
 const searchEngineName = computed(() => (SEARCH_ENGINES[searchEngine.value] || SEARCH_ENGINES.bing).name)
 watch(searchEngine, (v) => { localStorage.setItem('searchEngine', v); saveUiPref({ searchEngine: v }) })
-watch(showHidden, (v) => { saveUiPref({ showHidden: v }) })
-// 图标库：内置常用图标 + 搜索（零依赖）
-const showIconPicker = ref(false)
-const iconQuery = ref('')
-const ICON_LIBRARY = [
-  'mdi:web', 'mdi:server', 'mdi:nas', 'mdi:router-wireless', 'mdi:docker', 'mdi:docker-hub', 'mdi:github', 'mdi:gitlab',
-  'mdi:cloud', 'mdi:cloud-outline', 'mdi:database', 'mdi:folder', 'mdi:folder-network', 'mdi:file-document',
-  'mdi:monitor-dashboard', 'mdi:television', 'mdi:music', 'mdi:movie', 'mdi:cctv', 'mdi:home-automation',
-  'mdi:lightning-bolt', 'mdi:wifi', 'mdi:shield-lock', 'mdi:key-variant', 'mdi:account', 'mdi:email',
-  'mdi:calendar', 'mdi:note-text', 'mdi:chart-line', 'mdi:download', 'mdi:upload', 'mdi:tools',
-  'mdi:server-network', 'mdi:memory', 'mdi:harddisk', 'mdi:printer', 'mdi:camera', 'mdi:gamepad-variant',
-  'mdi:book-open-variant', 'mdi:rss', 'mdi:youtube', 'mdi:telegram', 'mdi:wechat', 'mdi:weather-partly-cloudy',
-  'mdi:clock-outline', 'mdi:view-dashboard-outline', 'mdi:google', 'mdi:linux'
-]
-const filteredIcons = computed(() => {
-  const q = iconQuery.value.trim().toLowerCase()
-  if (!q) return ICON_LIBRARY
-  return ICON_LIBRARY.filter((n) => n.toLowerCase().includes(q))
-})
-const openIconPicker = () => { showIconPicker.value = true; iconQuery.value = '' }
-const pickIcon = (name) => { formData.value.icon = name; showIconPicker.value = false }
 
 const searchOnWeb = () => {
   const q = searchQuery.value.trim()
@@ -2174,24 +2153,6 @@ onUnmounted(() => {
 
       <!-- 新增 / 编辑应用弹窗 --><div v-if="showModal" class="modal-overlay">
         <div class="modal-content glass-strong scrollable editor-modal">
-          <div v-if="showIconPicker" class="icon-picker" @click.self="showIconPicker = false">
-            <div class="icon-picker-panel">
-              <div class="icon-picker-head">
-                <AppIcon icon="mdi:view-grid-plus-outline" />
-                <span>选一个图标</span>
-                <button type="button" @click="showIconPicker = false"><AppIcon icon="mdi:close" /></button>
-              </div>
-              <input v-model="iconQuery" class="glass-input" type="text" placeholder="搜索：server / cloud / docker…" />
-              <div class="icon-picker-grid">
-                <button
-                  v-for="name in filteredIcons" :key="name" type="button"
-                  class="icon-picker-item" :class="{ active: formData.icon === name }"
-                  :title="name" @click="pickIcon(name)"
-                ><AppIcon :icon="name" /></button>
-              </div>
-              <p v-if="!filteredIcons.length" class="icon-picker-empty">没找到，可直接在上面输入 Iconify 名称</p>
-            </div>
-          </div>
           <div class="modal-preview">
             <div class="mp-card" :style="{ background: mpBg }">
               <div class="mp-icon">
@@ -2257,11 +2218,16 @@ onUnmounted(() => {
               </label>
             </div>
             <div class="icon-lib-row">
-              <button class="icon-lib-btn" type="button" @click="openIconPicker">
-                <AppIcon icon="mdi:view-grid-plus-outline" />
-                <span>从图标库挑选</span>
-                <span class="icon-lib-hint">内置 48 个常用图标，可搜索</span>
-              </button>
+              <a
+                class="icon-lib-btn"
+                href="https://icon-sets.iconify.design/"
+                target="_blank" rel="noopener noreferrer"
+                title="在新标签页打开 Iconify 图标库，复制名称粘贴到上面"
+              >
+                <AppIcon icon="mdi:open-in-new" />
+                <span>在线图标库</span>
+                <span class="icon-lib-hint">打开 icon-sets.iconify.design，复制名称粘到上面</span>
+              </a>
             </div>
           </div>
 
@@ -2280,11 +2246,11 @@ onUnmounted(() => {
             <label class="switch"><input type="checkbox" v-model="formData.isMonitored"><span class="slider-round"></span></label>
             <span class="switch-text">设备在线监测</span>
           </div>
-          </div>
           <div class="form-group" v-if="formData.isMonitored" style="background: rgba(0,0,0,0.1); padding: 15px; border-radius: 10px;">
             <label style="color: #10b981"><AppIcon icon="mdi:radar" /> Ping / TCP 检测地址</label>
             <input v-model="formData.pingUrl" type="text" class="glass-input full-w mt-2" placeholder="IP或域名 (例: 192.168.1.1 或 google.com:80)" />
             <p style="font-size: 11px; color: color-mix(in srgb, var(--theme-color) 62%, transparent); margin: 8px 0 0 0;">填写端口号则执行精准 TCP 检测，不填则执行 ICMP Ping 探测（容器无 ping 命令时自动降级 TCP）。</p>
+          </div>
           </div>
 
           <div class="modal-actions">

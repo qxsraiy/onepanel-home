@@ -2128,7 +2128,12 @@ function takeChallenge(key) {
 app.get('/api/passkey/status', ah(async (req, res) => {
   await ensurePasskeyTable();
   const rows = await prisma.$queryRawUnsafe('SELECT COUNT(*) AS n FROM Passkey').catch(() => [{ n: 0 }]);
-  res.json({ enabled: Number(rows[0]?.n || 0) > 0, rpId: RP_ID, rpName: RP_NAME });
+  res.json({
+    enabled: Number(rows[0]?.n || 0) > 0,
+    rpId: rpIdFor(req),
+    configuredRpId: WEBAUTHN_RP_ID_RUNTIME || '',
+    rpName: RP_NAME,
+  });
 }));
 
 /** ① 注册：生成 options（需登录） */
@@ -3255,6 +3260,8 @@ app.put('/api/items/bulk-style', authenticateToken, ah(async (req, res) => {
   for (const item of list) {
     if (!applyToAll && (item.bgColor || item.bgColor === '')) continue;
     await itemStore.patch(item.id, patchBody);
+    // 原来只 patch 不记录变更 → dirty 没人消费，批量改的样式永远不同步到其它节点
+    try { await recordChangeForItem(item.uid, 'upsert'); } catch (e) { console.warn('[bulk-style] 记录变更失败:', e.message); }
     changed += 1;
   }
   res.json({ success: true, changed });
