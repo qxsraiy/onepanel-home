@@ -40,6 +40,23 @@ jobs:
           npm ci --omit=dev --no-audit --no-fund
           rm -rf node_modules/.cache
 
+      - name: 生成多平台 Prisma 查询引擎
+        working-directory: backend
+        run: |
+          # schema.prisma 里已声明 binaryTargets（debian x64 + linux-arm64）
+          # 必须显式跑一次，确保两个平台的 .so.node 都在包里
+          npx prisma generate
+          echo "--- 生成的引擎 ---"
+          ls -la node_modules/.prisma/client/ | grep -E 'libquery_engine|\.so\.node' || true
+          # 强制校验：两个平台引擎都必须存在
+          if [ ! -f node_modules/.prisma/client/libquery_engine-debian-openssl-3.0.x.so.node ]; then
+            echo "❌ 缺少 x64 引擎"; exit 1
+          fi
+          if [ ! -f node_modules/.prisma/client/libquery_engine-linux-arm64-openssl-3.0.x.so.node ]; then
+            echo "❌ 缺少 arm64 引擎"; exit 1
+          fi
+          echo "✅ 两个平台引擎都在"
+
       - name: 组装发布包
         run: |
           VER="${GITHUB_REF_NAME#v}"
@@ -90,6 +107,7 @@ jobs:
         shell: pwsh
         run: |
           npm ci --omit=dev --no-audit --no-fund
+          npx prisma generate
           $ver = (Get-Content package.json | ConvertFrom-Json).version
           $out = "..\dist\onepanel-portable-v$ver-win-x64"
           New-Item -ItemType Directory -Force -Path $out | Out-Null

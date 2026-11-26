@@ -5,6 +5,8 @@ generator client {
   // library 模式：查询引擎以 N-API 动态库加载，不再 spawn 子进程
   // （既省一个常驻进程，也避免受限环境下 spawn EPERM）
   engineType = "library"
+  // 跨平台发布：必须声明所有目标平台的查询引擎，否则 arm64 启动报找不到引擎
+  binaryTargets = ["native", "debian-openssl-3.0.x", "linux-arm64-openssl-3.0.x"]
 }
 
 datasource db {

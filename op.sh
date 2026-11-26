@@ -554,11 +554,16 @@ PORT=$PORT
 OP_DATA_DIR=$DATA_DIR
 DATABASE_URL=file:${DATA_DIR}/onepanel.db
 NODE_ENV=production
-# 有多节点/HTTPS 域名时再填：
-# COOKIE_DOMAIN=.yourdomain.com
-# COOKIE_SECURE=1
-# WEBAUTHN_RP_ID=yourdomain.com
-# WEBAUTHN_HOSTS=cn.yourdomain.com,us.yourdomain.com
+#
+# ── 多节点 / HTTPS 域名 ──
+# 只有【第一台】节点需要手填这两行，之后加的节点入网时会自动继承。
+# 父域是什么就填什么：例如域名是 cn.xtay.cn / us.xtay.cn，父域就是 xtay.cn。
+#
+# COOKIE_DOMAIN=.xtay.cn
+# WEBAUTHN_RP_ID=xtay.cn
+#
+# 注意：不要写 WEBAUTHN_HOSTS（白名单会把子域锁死，加新节点还得改老节点）。
+# 留空即可 —— 代码会自动放行 RP_ID 下的所有子域。
 EOF
   chmod 600 "$ENV_FILE"
   log "已生成配置：$ENV_FILE（改端口/域名请编辑它）"
