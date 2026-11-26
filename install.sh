@@ -77,6 +77,166 @@ gh_text() {
 log() { echo -e "\033[36m[onepanel]\033[0m $*"; }
 err() { echo -e "\033[31m[错误]\033[0m $*" >&2; }
 
+# ======================================================================
+#  交互菜单：直接执行 bash install.sh 时进入；curl | bash 时跳过
+# ======================================================================
+is_tty() { [ -t 0 ] && [ -t 1 ]; }
+
+show_menu() {
+  echo ""
+  echo "╔══════════════════════════════════════════════╗"
+  echo "║            OnePanel 管理菜单                  ║"
+  echo "╠══════════════════════════════════════════════╣"
+  echo "║  1) 安装 / 升级到最新版                       ║"
+  echo "║  2) 卸载（可选择是否保留数据）                 ║"
+  echo "║  3) 修改端口                                  ║"
+  echo "║  4) 查看运行状态                              ║"
+  echo "║  5) 重启服务                                  ║"
+  echo "║  6) 查看实时日志                              ║"
+  echo "║  7) 回滚上一版本                              ║"
+  echo "║  8) 开启/关闭自动更新                         ║"
+  echo "║  0) 退出                                      ║"
+  echo "╚══════════════════════════════════════════════╝"
+}
+
+need_installed() {
+  if [ ! -L "${INSTALL_DIR}/current" ]; then
+    err "还没有安装 OnePanel（找不到 ${INSTALL_DIR}/current）"
+    err "请先选 1 安装"
+    return 1
+  fi
+  return 0
+}
+
+do_uninstall() {
+  need_installed || return 1
+  echo ""
+  echo "  即将卸载 OnePanel。数据目录：${DATA_DIR}"
+  printf "  是否保留数据（数据库/节点身份）？[Y/n] "
+  read -r keep
+  case "$keep" in n|N) KEEP_DATA=0 ;; *) KEEP_DATA=1 ;; esac
+  systemctl stop onepanel 2>/dev/null || true
+  systemctl disable onepanel 2>/dev/null || true
+  rm -f /etc/systemd/system/onepanel.service
+  systemctl daemon-reload 2>/dev/null || true
+  crontab -l 2>/dev/null | grep -v "onepanel/current/upgrade.sh" | crontab - 2>/dev/null || true
+  rm -rf "${INSTALL_DIR}/current" "${INSTALL_DIR}/versions"
+  if [ "$KEEP_DATA" -eq 0 ]; then
+    rm -rf "$DATA_DIR"
+    echo "  ✅ 已卸载（数据已删除）"
+  else
+    echo "  ✅ 已卸载（数据保留在 ${DATA_DIR}）"
+  fi
+}
+
+do_change_port() {
+  need_installed || return 1
+  local cur np
+  cur="$(grep -E "^PORT=" "${INSTALL_DIR}/onepanel.env" 2>/dev/null | cut -d= -f2)"
+  cur="${cur:-5266}"
+  printf "  当前端口 %s，输入新端口 [回车保持]: " "$cur"
+  read -r np
+  [ -z "$np" ] && { echo "  未修改"; return 0; }
+  case "$np" in (*[!0-9]*) err "端口必须是数字"; return 1 ;; esac
+  sed -i "s/^PORT=.*/PORT=${np}/" "${INSTALL_DIR}/onepanel.env"
+  echo "  ✅ 端口已改为 ${np}，正在重启"
+  systemctl restart onepanel 2>/dev/null || true
+  sleep 5
+  if curl -fsS --max-time 5 "http://127.0.0.1:${np}/api/health" >/dev/null 2>&1; then
+    echo "  ✅ 服务已在 ${np} 端口正常响应"
+  else
+    err "  新端口无响应，检查防火墙 / SELinux / 端口占用"
+  fi
+}
+
+do_status() {
+  need_installed || return 1
+  local port ver
+  port="$(grep -E "^PORT=" "${INSTALL_DIR}/onepanel.env" 2>/dev/null | cut -d= -f2)"
+  port="${port:-5266}"
+  ver="$(cat "${INSTALL_DIR}/current/.version" 2>/dev/null || echo "?")"
+  echo ""
+  echo "  版本：${ver}"
+  echo "  端口：${port}"
+  echo "  数据：${DATA_DIR}"
+  echo "  systemd：$(systemctl is-active onepanel 2>/dev/null || echo inactive)"
+  if curl -fsS --max-time 5 "http://127.0.0.1:${port}/api/health" >/dev/null 2>&1; then
+    echo "  健康：✅ 正常"
+  else
+    echo "  健康：❌ 无响应"
+  fi
+  echo "  已装版本：$(ls -1 "${INSTALL_DIR}/versions" 2>/dev/null | tr "\n" " ")"
+}
+
+do_restart() {
+  need_installed || return 1
+  systemctl restart onepanel 2>/dev/null || err "systemctl restart 失败"
+  echo "  已重启，等待健康检查…"
+  sleep 5
+  local port
+  port="$(grep -E "^PORT=" "${INSTALL_DIR}/onepanel.env" 2>/dev/null | cut -d= -f2)"
+  port="${port:-5266}"
+  if curl -fsS --max-time 5 "http://127.0.0.1:${port}/api/health" >/dev/null 2>&1; then
+    echo "  ✅ 服务正常"
+  else
+    err "  服务无响应，看日志：journalctl -u onepanel -n 50"
+  fi
+}
+
+do_logs() {
+  echo "  按 Ctrl+C 退出"
+  journalctl -u onepanel -f -n 50 2>/dev/null || true
+}
+
+do_rollback() {
+  need_installed || return 1
+  bash "${INSTALL_DIR}/current/upgrade.sh" --rollback
+}
+
+do_auto_update() {
+  need_installed || return 1
+  if crontab -l 2>/dev/null | grep -q "onepanel/current/upgrade.sh"; then
+    printf "  当前已开启自动更新，关闭？[y/N] "
+    read -r off
+    case "$off" in y|Y)
+      crontab -l 2>/dev/null | grep -v "onepanel/current/upgrade.sh" | crontab -
+      echo "  ✅ 已关闭自动更新" ;;
+    esac
+  else
+    printf "  每天几点自动检查更新？[默认 4] "
+    read -r hour
+    hour="${hour:-4}"
+    (crontab -l 2>/dev/null | grep -v "onepanel/current/upgrade.sh"; \
+     echo "0 ${hour} * * * bash ${INSTALL_DIR}/current/upgrade.sh --auto >> ${INSTALL_DIR}/upgrade.log 2>&1") | crontab -
+    echo "  ✅ 已开启：每天 ${hour}:00 自动检查更新"
+  fi
+}
+
+run_menu() {
+  while true; do
+    show_menu
+    printf "  请选择 [0-8]: "
+    read -r choice
+    case "$choice" in
+      1) echo "  → 进入安装流程"; return 0 ;;
+      2) do_uninstall; echo ""; read -r -p "  按回车继续…" _ ;;
+      3) do_change_port; echo ""; read -r -p "  按回车继续…" _ ;;
+      4) do_status; echo ""; read -r -p "  按回车继续…" _ ;;
+      5) do_restart; echo ""; read -r -p "  按回车继续…" _ ;;
+      6) do_logs ;;
+      7) do_rollback; echo ""; read -r -p "  按回车继续…" _ ;;
+      8) do_auto_update; echo ""; read -r -p "  按回车继续…" _ ;;
+      0) echo "  再见"; exit 0 ;;
+      *) echo "  无效选项" ;;
+    esac
+  done
+}
+
+# 有显式参数 或 非交互管道 -> 跳过菜单，直接安装
+if is_tty && [ $# -eq 0 ]; then
+  run_menu
+fi
+
 # ---------- 1. 环境检查 ----------
 command -v curl >/dev/null || { err "需要 curl"; exit 1; }
 command -v tar  >/dev/null || { err "需要 tar"; exit 1; }
