@@ -732,13 +732,6 @@ function authCookie(token, maxAge = 30 * 24 * 3600, req = null) {
     'Max-Age=' + maxAge,
   ];
 
-  let host = '';
-  let isHttps = false;
-  if (req) {
-    host = String((req.headers['x-forwarded-host'] || req.headers.host || '')).split(',')[0].trim().toLowerCase().replace(/:\d+$/, '');
-    isHttps = req.secure || String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
-  }
-
   // Domain：配置了就加上。
   // 【v3.21.2 修复】不再做 host 匹配判断 —— 反代常把 Host 改写成 127.0.0.1:5266，
   // 按 Host 判断会导致域名访问时漏加 Domain，浏览器收不到 Cookie → 「登录已失效」。
@@ -747,14 +740,14 @@ function authCookie(token, maxAge = 30 * 24 * 3600, req = null) {
     parts.push('Domain=' + COOKIE_DOMAIN);
   }
 
-  // Secure：只在 https 时加
+  // Secure：配置了就加上。
+  // 【v3.21.3】不再判断"当前请求是不是 https"。
+  // 原因：Cloudflare 小黄云在 Flexible 模式下，CF→源站是 http，
+  // 源站收到的 X-Forwarded-Proto 是 http，按请求判断会漏加 Secure；
+  // 但浏览器侧始终是 https，带 Secure 的 Cookie 完全能工作，反而更安全。
+  // 你配了 COOKIE_SECURE=1 就说明你在用 https，直接加。
   if (COOKIE_SECURE) {
-    if (isHttps || !req) {
-      parts.push('Secure');
-    } else if (!cookieWarned) {
-      cookieWarned = true;
-      console.warn('[cookie] COOKIE_SECURE 已开启，但当前请求不是 https（host=' + host + '），本次不加 Secure（否则浏览器会丢弃 Cookie）。请用 https 访问，或临时设 COOKIE_SECURE=0。');
-    }
+    parts.push('Secure');
   }
 
   return parts.join('; ');
