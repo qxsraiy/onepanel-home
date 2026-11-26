@@ -2141,20 +2141,6 @@ onUnmounted(() => {
           </div>
           <div class="form-group"><label>描述信息</label><input v-model="formData.description" type="text" maxlength="50" class="glass-input" /></div>
 
-          <div class="form-group">
-            <label>桌面小组件（选了就是纯展示块，不用填网址）</label>
-            <SelectBox
-                              v-model="formData.widgetType"
-                              :options="[
-                                { label: '普通卡片（填网址）', value: '' },
-                                { label: '系统状态 — CPU / 内存 / 磁盘', value: 'system' },
-                                { label: '时钟 — 本地时间与日期', value: 'clock' },
-                                { label: '天气 — 城市与天气', value: 'weather' },
-                              ]"
-                              placeholder="普通卡片"
-                            />
-          </div>
-
           <div class="form-group" v-if="!formData.widgetType">
             <label>打开方式</label>
             <SelectBox
