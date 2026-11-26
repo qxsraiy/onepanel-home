@@ -57,61 +57,6 @@ const activeTab = ref(props.initialTab || 'personalize')
 // 父组件切换 initialTab 时同步（showSettings 复用同一实例）
 watch(() => props.initialTab, (v) => { if (v) activeTab.value = v })
 
-// ---- 转移导出（v2.8.0）：换机 / 搬家用，必须二次验证身份 ----
-const transferOpen = ref(false)
-const transferBusy = ref(false)
-const transferForm = ref({ password: '', code: '' })
-const twoFactorEnabled = ref(false)
-const transferMode = ref('export')      // export | import
-const transferImportMode = ref('replace') // replace | merge
-const transferPayload = ref(null)
-const transferItemCount = ref(0)
-
-const openTransfer = async (mode = 'export') => {
-  transferForm.value = { password: '', code: '' }
-  transferMode.value = mode
-  if (mode === 'export') { transferPayload.value = null; transferItemCount.value = 0 }
-  transferOpen.value = true
-  try {
-    const { data } = await axios.get('/api/2fa/status')
-    twoFactorEnabled.value = !!data.enabled
-  } catch {
-    twoFactorEnabled.value = false
-  }
-}
-
-const doTransferAction = async () => {
-  const { password, code } = transferForm.value
-  if (!password.trim() && !code.trim()) return toast('请输入账号密码或两步验证码', 'warn')
-  transferBusy.value = true
-  try {
-    if (transferMode.value === 'import') {
-      const res = await axios.post('/api/transfer/import', {
-        payload: transferPayload.value,
-        mode: transferImportMode.value,
-        password, code,
-      })
-      transferOpen.value = false
-      transferPayload.value = null
-      toast(`导入成功，当前共 ${res.data.total} 张卡片，页面即将刷新`, 'success', 3000)
-      emit('refresh-items')
-      inputEl.value = ''
-      setTimeout(() => window.location.reload(), 1200)
-      return
-    }
-    const { data } = await axios.post('/api/transfer/export', { password, code })
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
-    saveAs(blob, `onepanel-transfer-${stamp}.json`)
-    transferOpen.value = false
-    toast(`已导出 ${data.items?.length || 0} 张卡片（含备忘录明文），请妥善保管`, 'success')
-  } catch (e) {
-    toast(e.response?.data?.error || '操作失败', 'error')
-  } finally {
-    transferBusy.value = false
-  }
-}
-
 // WebDAV 与恢复
 const webdavConfig = ref({ url: '', user: '', pass: '' })
 const isWebdavEditing = ref(true)
@@ -300,26 +245,6 @@ const downloadBackup = async () => {
   finally { if (objectUrl) setTimeout(() => window.URL.revokeObjectURL(objectUrl), 5000) }
 }
 
-// ====== 解密转移 JSON（导出/导入都要二次验证身份） ======
-const pickTransferFile = (event) => {
-  const file = event.target.files[0]
-  event.target.value = ''
-  if (!file) return
-  const reader = new FileReader()
-  reader.onload = (e) => {
-    let payload
-    try { payload = JSON.parse(String(e.target.result)) } catch { return toast('不是合法的 JSON 文件', 'error') }
-    const items = payload?.items || payload?.data?.items
-    if (!Array.isArray(items)) return toast('这不是 OnePanel 的转移 JSON', 'error')
-    transferPayload.value = payload
-    transferItemCount.value = items.length
-    transferForm.value = { password: '', code: '' }
-    transferMode.value = 'import'
-    transferImportMode.value = 'replace'
-    transferOpen.value = true
-  }
-  reader.readAsText(file)
-}
 
 const handleLocalRestore = (event) => {
   const file = event.target.files[0]
@@ -709,22 +634,6 @@ const handleCloseCheck = async () => {
               <p style="font-size: 12px; color: #f87171; margin-top: 12px;">⚠️ 上传恢复会清空并覆盖当前卡片、分组、主题；账号与口令保留。</p>
             </div>
 
-            <!-- ③ 解密转移 JSON -->
-            <div class="setting-block mt-4">
-              <h4><AppIcon icon="mdi:swap-horizontal" /> 解密转移 JSON</h4>
-              <p style="font-size: 12px; color: #fbbf24; margin-bottom: 12px;">
-                换机专用：一个文件装下所有卡片的名称、描述、图标、全部网址、分组、标记、小组件配置
-                <b>以及备忘录明文</b>（方便到新机器上直接还原）。导出与导入都要先验证身份（账号密码或两步验证码）。
-              </p>
-              <div class="action-row">
-                <button class="btn-outline" style="border-color: #fbbf24; color: #fbbf24;" @click="openTransfer('export')">
-                  <AppIcon icon="mdi:shield-key" /> 验证身份并导出
-                </button>
-                <label class="upload-btn" style="cursor:pointer; border-color: #fbbf24; color: #fbbf24;">
-                  <AppIcon icon="mdi:file-import-outline" /> 导入转移 JSON<input type="file" accept=".json" @change="pickTransferFile" style="display:none;" />
-                </label>
-              </div>
-            </div>
           </div>
           <div v-if="activeTab === 'ext'" class="content-area">
             <ExtensionPanel />
@@ -814,45 +723,6 @@ const handleCloseCheck = async () => {
         </div>
       </div>
 
-      <!-- 🔐 转移导出二次验证 -->
-      <div v-if="transferOpen" class="transfer-mask" @click.self="transferOpen = false">
-        <div class="transfer-card glass-strong">
-          <h3>{{ transferMode === 'export' ? '🔐 导出转移数据' : '🔐 导入转移数据' }}</h3>
-          <p class="transfer-tip" v-if="transferMode === 'export'">
-            这份 JSON 包含所有卡片信息与<b>备忘录明文</b>，请确认是本人操作。
-          </p>
-          <p class="transfer-tip" v-else>
-            即将导入 <b>{{ transferItemCount }} 张卡片</b>（含备忘录明文）。导入会覆盖或合并当前数据，请确认是本人操作。
-          </p>
-          <div class="form-group" v-if="transferMode === 'import'">
-            <label>导入方式</label>
-            <SelectBox
-                                    v-model="transferImportMode"
-                                    :options="[
-                                      { label: '合并（保留现有卡片）', value: 'merge' },
-                                      { label: '覆盖（清空后导入）', value: 'replace' },
-                                    ]"
-                                    placeholder="合并"
-                                  />
-          </div>
-          <div class="form-group">
-            <label>账号密码</label>
-            <input v-model="transferForm.password" type="password" class="glass-input full-w" placeholder="当前登录密码" @keyup.enter="doTransferAction" />
-          </div>
-          <div class="form-group" v-if="twoFactorEnabled" style="margin-top: 10px;">
-            <label>或两步验证码（6 位）</label>
-            <input v-model="transferForm.code" type="text" inputmode="numeric" maxlength="6" class="glass-input full-w"
-              placeholder="验证器上的 6 位数字" style="letter-spacing: 3px;" @keyup.enter="doTransferAction" />
-          </div>
-          <p v-else class="transfer-tip" style="opacity:.6">未开启两步验证，输入密码即可。</p>
-          <div class="modal-actions" style="margin-top: 16px;">
-            <button class="btn-cancel" @click="transferOpen = false">取消</button>
-            <button class="btn-primary" :disabled="transferBusy" @click="doTransferAction">
-              {{ transferBusy ? '验证中…' : (transferMode === 'export' ? '验证并下载' : '验证并导入') }}
-            </button>
-          </div>
-        </div>
-      </div>
 
       <div class="settings-footer">
         <button class="btn-cancel" @click="handleCloseCheck">关闭</button>
@@ -865,18 +735,6 @@ const handleCloseCheck = async () => {
 <style scoped>
 .settings-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 999; }
 
-/* 转移导出二次验证弹窗 */
-.transfer-mask { position: absolute; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 5; border-radius: 16px; }
-/* 注意：glass-strong 定义在 App.vue 的 scoped 样式里，这里用不到，必须自己给不透明底色 */
-.transfer-card {
-  width: min(400px, calc(100vw - 40px)); padding: 22px; border-radius: 14px;
-  background: color-mix(in srgb, var(--theme-bg) 97%, #000);
-  border: 1px solid color-mix(in srgb, var(--theme-color) 18%, transparent);
-  box-shadow: 0 18px 40px rgba(0,0,0,.55);
-}
-.transfer-card h3 { margin: 0 0 10px; font-size: 16px; }
-.transfer-tip { font-size: 12px; line-height: 1.6; color: color-mix(in srgb, var(--theme-color) 60%, transparent); margin: 0 0 12px; }
-.transfer-tip b { color: #fbbf24; }
 
 .settings-container {
   width: min(920px, calc(100vw - 24px));

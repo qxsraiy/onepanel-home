@@ -2148,6 +2148,19 @@ app.get('/api/passkey/register/options', authenticateToken, ah(async (req, res) 
     // 以后指纹一按同时完成"登录 + 解锁保险库"。Chromium 系（Chrome/Edge）已支持。
     extensions: { prf: { eval: { first: require('./services/prfVault').prfSalt() } } },
   });
+  /**
+   * 【v3.24.0 修复】PRF salt 必须是 ArrayBuffer，但 Buffer 经 res.json() 会变成
+   * {"type":"Buffer","data":[...]}，前端原样丢给浏览器会报
+   * "The provided value is not of type '(ArrayBuffer or ArrayBufferView)'"。
+   * 这里统一转成 base64url 字符串，由前端解码成 ArrayBuffer。
+   */
+  try {
+    const raw = options?.extensions?.prf?.eval?.first;
+    if (raw) {
+      const buf = Buffer.isBuffer(raw) ? raw : (raw instanceof Uint8Array ? Buffer.from(raw) : null);
+      options.extensions.prf.eval.first = buf ? buf.toString('base64url') : String(raw);
+    }
+  } catch { /* 忽略 */ }
   const key = putChallenge('reg', options.challenge);
   res.json({ options, challengeKey: key });
 }));
@@ -2221,6 +2234,14 @@ app.get('/api/passkey/login/options', loginLimiter, ah(async (req, res) => {
     // 【PRF】登录时也要请求，才能拿到同样的派生输出用于解锁
     extensions: { prf: { eval: { first: require('./services/prfVault').prfSalt() } } },
   });
+  // 【v3.24.0】同注册：Buffer 经 res.json 会变成 {type:'Buffer'}，转成 base64url 给前端解码
+  try {
+    const raw = options?.extensions?.prf?.eval?.first;
+    if (raw) {
+      const buf = Buffer.isBuffer(raw) ? raw : (raw instanceof Uint8Array ? Buffer.from(raw) : null);
+      options.extensions.prf.eval.first = buf ? buf.toString('base64url') : String(raw);
+    }
+  } catch { /* 忽略 */ }
   const key = putChallenge('login', options.challenge);
   res.json({ options, challengeKey: key });
 }));

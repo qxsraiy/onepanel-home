@@ -22,11 +22,32 @@ const list = ref([]);
 const busy = ref(false);
 
 function b64urlToBuf(s) {
-  const pad = s.length % 4 ? 4 - (s.length % 4) : 0;
-  const b = atob((s + '='.repeat(pad)).replace(/-/g, '+').replace(/_/g, '/'));
+  // 兼容三种形态：base64url 字符串 / { type:'Buffer', data:[...] } / ArrayBuffer·Uint8Array
+  if (s instanceof ArrayBuffer) return s;
+  if (s instanceof Uint8Array) return s.buffer.slice(s.byteOffset, s.byteOffset + s.byteLength);
+  if (s && typeof s === 'object' && Array.isArray(s.data)) {
+    return new Uint8Array(s.data).buffer;
+  }
+  const str = String(s || '');
+  const pad = str.length % 4 ? 4 - (str.length % 4) : 0;
+  const b = atob((str + '='.repeat(pad)).replace(/-/g, '+').replace(/_/g, '/'));
   const buf = new Uint8Array(b.length);
   for (let i = 0; i < b.length; i += 1) buf[i] = b.charCodeAt(i);
   return buf.buffer;
+}
+
+/**
+ * 规范化从后端拿到的 extensions：
+ * PRF 的 eval.first 必须是 ArrayBuffer/ArrayBufferView，字符串会直接报错。
+ */
+function normalizeExtensions(ext) {
+  if (!ext || typeof ext !== 'object') return null;
+  const out = JSON.parse(JSON.stringify(ext));
+  const first = out?.prf?.eval?.first;
+  if (first !== undefined && first !== null) {
+    try { out.prf.eval.first = b64urlToBuf(first); } catch { delete out.prf.eval.first; }
+  }
+  return out;
 }
 function bufToB64url(buf) {
   const b = new Uint8Array(buf);
@@ -68,7 +89,10 @@ async function register() {
         attestation: o.attestation || 'none',
         authenticatorSelection: o.authenticatorSelection,
         // 【PRF】Chrome / Edge 支持：让认证器派生一个稳定密钥，用来解保险库
-        ...(o.extensions ? { extensions: o.extensions } : {}),
+        // 【v3.24.0 修复】后端下发的 prf.eval.first 可能是 base64url 字符串、
+        // {type:'Buffer',data:[...]} 或数组，统一转成 ArrayBuffer，
+        // 否则浏览器报 "The provided value is not of type '(ArrayBuffer or ArrayBufferView)'"。
+        ...(normalizeExtensions(o.extensions) ? { extensions: normalizeExtensions(o.extensions) } : {}),
         excludeCredentials: (o.excludeCredentials || []).map((c) => ({
           id: b64urlToBuf(c.id), type: c.type,
         })),
@@ -113,7 +137,7 @@ async function login() {
         rpId: o.rpId,
         timeout: o.timeout || 60000,
         userVerification: o.userVerification || 'preferred',
-        ...(o.extensions ? { extensions: o.extensions } : {}),
+        ...(normalizeExtensions(o.extensions) ? { extensions: normalizeExtensions(o.extensions) } : {}),
         allowCredentials: (o.allowCredentials || []).map((c) => ({
           id: b64urlToBuf(c.id), type: c.type,
         })),
