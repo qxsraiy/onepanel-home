@@ -87,6 +87,12 @@ async function loadNodeStats() {
 }
 /** 按 nodeId 找状态：本机返回 self，其他在 nodes 里找 */
 /** nodeId -> 状态对象（给拓扑图用） */
+/** 提示用户填什么地址（优先用当前访问地址） */
+const selfUrlHint = computed(() => {
+  if (typeof window === 'undefined') return 'https://你的域名'
+  return window.location.origin
+})
+
 const nodeStatsMap = computed(() => {
   const out = {}
   const s = nodeStats.value
@@ -317,36 +323,30 @@ onMounted(load);
 
 <template>
   <div class="sync-pane">
-    <!-- ===== 唯一的主视觉：邀请新设备 ===== -->
+    <!-- ===== 邀请新设备（账号密码 + 人工批准）===== -->
     <div class="setting-block">
       <h4><AppIcon icon="mdi:account-multiple-plus-outline" /> 邀请新设备加入</h4>
-      <p class="tip">在新设备装好后打开它的面板，扫码或粘贴下面的内容即可。10 分钟内有效、只能用一次。</p>
-
-      <div class="invite-row">
-        <button class="invite-btn" :disabled="busy" @click="toggleInvite('qr')">
-          <AppIcon icon="mdi:qrcode" class="invite-icon" />
-          <span>{{ showInvite === 'qr' ? '收起二维码' : '显示二维码' }}</span>
-        </button>
-        <button class="invite-btn" :disabled="busy" @click="toggleInvite('code')">
-          <AppIcon icon="mdi:key-variant" class="invite-icon" />
-          <span>{{ showInvite === 'code' ? '收起授权码' : '显示授权码' }}</span>
-        </button>
-      </div>
-
-            <div v-if="showInvite" class="invite-result">
-        <!-- 二维码模式：只有二维码，不再重复显示下面的文本 -->
-        <div v-if="showInvite === 'qr' && pairQr" class="pair-qr-wrap">
-          <img :src="pairQr" class="pair-qr" alt="配对二维码" />
-          <div class="pair-qr-tip">新设备有摄像头时直接扫这个码</div>
+      <p class="tip">
+        新设备装好后打开它的面板，选<b>「用账号密码加入」</b>，填下面这两样：
+      </p>
+      <div class="invite-guide">
+        <div class="ig-row">
+          <span class="ig-label">节点地址</span>
+          <code class="ig-val">{{ selfUrlHint }}</code>
         </div>
-        <!-- 授权码模式：只有文本 -->
-        <textarea v-else-if="showInvite === 'code'" v-model="pairText" readonly class="pair-box" rows="4"></textarea>
-        <div class="invite-actions">
-          <button class="btn-outline" @click="copyText(pairText)">复制授权码</button>
-          <button class="btn-outline" @click="showInvite = ''">收起</button>
+        <div class="ig-row">
+          <span class="ig-label">管理员账号</span>
+          <code class="ig-val">admin</code>
         </div>
-        <p class="tip warn-tip">⚠️ 这段内容里有节点地址和一次性配对码，请勿发到群里或论坛。</p>
+        <div class="ig-row">
+          <span class="ig-label">管理员密码</span>
+          <code class="ig-val">你自己的登录密码</code>
+        </div>
       </div>
+      <p class="tip" style="margin-top:10px">
+        新设备提交后会出现在这页的<b>「待批准的入网请求」</b>里，你点<b>批准</b>才会真正加入（5 分钟内有效）。
+        这样即使密码泄露，别人也进不来。
+      </p>
     </div>
 
     <!-- ===== 待批准的入网请求 ===== -->

@@ -2,8 +2,13 @@
 /**
  * 新节点引导（v3.6.1）
  * ------------------------------------------------------------------
- * 新设备装好后**未登录**就能看到四个入口：
- *   ① 扫码加入   ② 输入授权码   ③ 账号密码加入   ④ 不加入，单独使用
+ * 新设备装好后**未登录**就能看到两个入口：
+ *   ① 用账号密码加入（老节点需人工批准）  ② 不加入，单独使用（新组织第一台）
+ *
+ * 为什么去掉「扫码」和「输入授权码」：
+ *   授权码里带的地址是老节点自报的 selfUrls，填错（内网 IP / 未填）就连不上，
+ *   而报错又是 "Unexpected token '<'" 这种看不懂的。账号密码方式让用户
+ *   自己填地址，加上老节点人工批准（双重验证），更安全也更省心。
  *
  * 为什么扫码要检测：getUserMedia 只在 HTTPS 或 localhost 下可用，
  * 内网 http://192.168.x.x 调不起摄像头 -> 自动降级提示"用系统相机扫后粘贴"。
@@ -146,28 +151,13 @@ async function confirmStandalone(skipDomain) {
         <AppIcon icon="mdi:server-network" class="setup-logo" />
         <h1>这台设备还没有数据</h1>
         <p>要把它加入已有的 OnePanel 网络，还是单独使用？</p>
+        <p class="setup-note">
+          加入网络需要老节点管理员在面板上<b>点批准</b>（5 分钟内有效）
+        </p>
       </div>
 
       <!-- 入口列表 -->
       <div v-if="!mode" class="setup-entries">
-        <button class="entry" :class="{ dim: !scanReady }" @click="startScan">
-          <AppIcon icon="mdi:qrcode-scan" class="entry-icon" />
-          <div class="entry-text">
-            <b>扫码加入</b>
-            <span>用这台设备扫老设备上的二维码</span>
-          </div>
-          <AppIcon icon="mdi:chevron-right" class="entry-arrow" />
-        </button>
-
-        <button class="entry" @click="mode = 'code'">
-          <AppIcon icon="mdi:key-variant" class="entry-icon" />
-          <div class="entry-text">
-            <b>输入授权码</b>
-            <span>从老设备复制一段文本粘贴进来</span>
-          </div>
-          <AppIcon icon="mdi:chevron-right" class="entry-arrow" />
-        </button>
-
         <button class="entry" @click="mode = 'account'">
           <AppIcon icon="mdi:account-key-outline" class="entry-icon" />
           <div class="entry-text">
@@ -228,41 +218,6 @@ async function confirmStandalone(skipDomain) {
         <button class="sa-back" @click="mode = ''">← 返回</button>
       </div>
 
-      <!-- 扫码 -->
-      <div v-else-if="mode === 'scan'" class="setup-pane">
-        <div class="pane-head"><AppIcon icon="mdi:qrcode-scan" /> 扫码加入</div>
-        <div v-if="scanError" class="scan-error">{{ scanError }}</div>
-        <video v-show="scanReady && !scanError" ref="videoEl" class="scan-video" playsinline muted></video>
-        <p class="pane-tip">对准老设备屏幕上的二维码，识别到会自动填入。</p>
-        <div class="pane-actions">
-          <button class="btn-outline" @click="stopScan(); mode = ''">返回</button>
-          <button class="btn-outline" @click="stopScan(); mode = 'code'">改用输入授权码</button>
-        </div>
-      </div>
-
-      <!-- 授权码 -->
-      <div v-else-if="mode === 'code'" class="setup-pane">
-        <div class="pane-head"><AppIcon icon="mdi:key-variant" /> 输入授权码</div>
-        <p class="pane-tip">在老设备打开「设置 → 共享网络 → 生成授权码」，复制那串文本粘贴到这里。</p>
-        <textarea v-model="pairText" class="glass-input pair-input" rows="4" placeholder="粘贴授权码（一长串字符）"></textarea>
-        <div class="form-group">
-          <label>这台设备的名字</label>
-          <input v-model="nodeName" class="glass-input" maxlength="40" @input="localStorage.setItem('opNodeNameDraft', nodeName)" placeholder="例如：客厅 NAS" />
-          <span class="field-hint">会显示在对方的成员列表和网络拓扑图里</span>
-        </div>
-        <div class="form-group">
-          <label>本机对外地址（可留空，稍后补）</label>
-          <input v-model="accForm.selfUrls" class="glass-input" placeholder="http://这台机器地址:3000" />
-        </div>
-        <div class="pane-actions">
-          <button class="btn-outline" @click="mode = ''">返回</button>
-          <button class="btn-primary" :disabled="busy || !pairText.trim()" @click="joinByCode">
-            {{ busy ? '入网中…' : '加入网络' }}
-          </button>
-        </div>
-      </div>
-
-      <!-- 账号密码 -->
       <div v-else-if="mode === 'account'" class="setup-pane">
         <div class="pane-head"><AppIcon icon="mdi:account-key-outline" /> 用账号密码加入</div>
         <p class="pane-tip">填任意一台已有节点，以及它的管理员账号密码。新设备会继承这些卡片与登录凭据。</p>
@@ -293,6 +248,8 @@ async function confirmStandalone(skipDomain) {
 </template>
 
 <style scoped>
+.setup-note { font-size: 11.5px; opacity: .45; margin: 8px 0 0; line-height: 1.7; }
+.setup-note b { opacity: .7; font-weight: 600; }
 .standalone-panel { padding: 4px 2px; }
 .sa-tip { font-size: 12.5px; line-height: 1.9; opacity: .72; margin: 0 0 18px; }
 .sa-tip code, .sa-note code { font-family: ui-monospace, monospace; font-size: 11.5px;
