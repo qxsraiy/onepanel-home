@@ -88,9 +88,3 @@ CREATE TABLE AppSnapshot (
       updatedAt TEXT NOT NULL DEFAULT (datetime('now')),
       payload TEXT NOT NULL DEFAULT '{}'
     );
-
--- 后加列（已存在会失败，安装时忽略错误）
-ALTER TABLE AppConfig ADD COLUMN themeAccent TEXT;
-ALTER TABLE AppConfig ADD COLUMN uiPrefs TEXT DEFAULT '{}';
-ALTER TABLE AppConfig ADD COLUMN tokenEpoch INTEGER DEFAULT 0;
-ALTER TABLE Member ADD COLUMN name TEXT DEFAULT '';
