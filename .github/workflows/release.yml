@@ -46,6 +46,10 @@ jobs:
           if [ -z "$VER" ] || [ "$VER" = "main" ]; then VER="${{ github.event.inputs.version }}"; fi
           OUT="onepanel-${VER}-${{ matrix.arch }}"
           mkdir -p "dist/$OUT"
+          # 【关键】前端产物必须进 backend/public，否则装好打不开页面
+          mkdir -p backend/public
+          rm -rf backend/public/*
+          cp -r frontend/dist/* backend/public/
           cp -r backend "dist/$OUT/backend"
           cp -r shared "dist/$OUT/shared" 2>/dev/null || true
           cp start.sh upgrade.sh install.sh manage.sh "dist/$OUT/" 2>/dev/null || true
