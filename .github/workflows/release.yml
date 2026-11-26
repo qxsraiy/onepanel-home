@@ -75,12 +75,29 @@ jobs:
           # schema.sql 必须进包，否则新库建不了表
           mkdir -p "dist/$OUT/backend/bin"
           cp backend/bin/schema.sql "dist/$OUT/backend/bin/schema.sql" 2>/dev/null || true
+          # 裁剪：只留运行时真正需要的文件（100MB → 约 65MB）
+          # 运行时只用 .prisma/client 里本架构那一个引擎；
+          # prisma CLI / schema-engine / 其它架构引擎都是死重量。
+          rm -rf "dist/$OUT/backend/node_modules/prisma"
           rm -rf "dist/$OUT/backend/node_modules/.bin"
+          rm -f "dist/$OUT/backend/node_modules/@prisma/engines/schema-engine-"*
+          if [ "${{ matrix.arch }}" = "linux-x64" ]; then
+            rm -f "dist/$OUT/backend/node_modules/@prisma/engines/libquery_engine-linux-arm64-"*
+            rm -f "dist/$OUT/backend/node_modules/.prisma/client/libquery_engine-linux-arm64-"*
+          else
+            rm -f "dist/$OUT/backend/node_modules/@prisma/engines/libquery_engine-debian-"*
+            rm -f "dist/$OUT/backend/node_modules/.prisma/client/libquery_engine-debian-"*
+          fi
+          rm -f "dist/$OUT/backend/node_modules/.prisma/client/query-engine-windows"*
+          rm -f "dist/$OUT/backend/node_modules/.prisma/client/query_engine-windows"*
           rm -f "dist/$OUT/backend/prisma/"*.db
           echo "$VER" > "dist/$OUT/.version"
           cd dist
           tar -czf "${OUT}.tar.gz" "$OUT"
           sha256sum "${OUT}.tar.gz" > "${OUT}.tar.gz.sha256"
+          SIZE_MB=$(( $(stat -c%s "${OUT}.tar.gz") / 1024 / 1024 ))
+          echo "包体积：${SIZE_MB} MB"
+          if [ "$SIZE_MB" -gt 99 ]; then echo "⚠️ 超过 99MB，Gitee 镜像会失败"; fi
 
       - uses: actions/upload-artifact@v4
         with:

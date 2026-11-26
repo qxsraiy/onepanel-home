@@ -53,6 +53,8 @@ done
 #   ④ 直连 github.com
 # 两种镜像规则都试：域名替换（down.xtay.cn/qxsraiy/...）与前缀拼接（ghfast.top/https://...）
 MIRROR_SELF="${OP_MIRROR:-https://down.xtay.cn}"
+# Gitee 国内镜像（只镜像正式版的 x64 包；脚本/源码全量同步）
+GITEE_BASE="https://gitee.com/a1225/onepanel-home"
 MIRROR_PUBLIC=("https://ghfast.top" "https://gh-proxy.com" "https://ghproxy.net")
 ACTIVE_MIRROR=""
 
@@ -65,6 +67,12 @@ gh_fetch() {
   case "$url" in
     https://github.com/*)
       tries+=("${MIRROR_SELF%/}/${url#https://github.com/}")
+      # Gitee：github.com/owner/repo/xxx -> gitee.com/a1225/onepanel-home/xxx
+      case "$url" in
+        https://github.com/qxsraiy/onepanel-home/*)
+          tries+=("${GITEE_BASE}/${url#https://github.com/qxsraiy/onepanel-home/}")
+          ;;
+      esac
       ;;
     https://api.github.com/*)
       tries+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}")

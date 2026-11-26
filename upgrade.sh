@@ -26,13 +26,21 @@ if [[ "${1:-}" == "--pkg" && -n "${2:-}" ]]; then LOCAL_PKG="$2"; MODE="local"; 
 # ---------- 下载源 ----------
 # 与 op.sh 一致：自建镜像 down.xtay.cn 优先，其次公共镜像，最后直连
 MIRROR_SELF="${OP_MIRROR:-https://down.xtay.cn}"
+GITEE_BASE="https://gitee.com/a1225/onepanel-home"
 MIRROR_PUBLIC=("https://ghfast.top" "https://gh-proxy.com" "https://ghproxy.net")
 
 gh_fetch() {
   local url="$1" out="$2" tmo="${3:-60}" try m
   local -a tries=()
   case "$url" in
-    https://github.com/*) tries+=("${MIRROR_SELF%/}/${url#https://github.com/}") ;;
+    https://github.com/*)
+      tries+=("${MIRROR_SELF%/}/${url#https://github.com/}")
+      case "$url" in
+        https://github.com/qxsraiy/onepanel-home/*)
+          tries+=("${GITEE_BASE}/${url#https://github.com/qxsraiy/onepanel-home/}")
+          ;;
+      esac
+      ;;
     https://api.github.com/*) tries+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}") ;;
   esac
   for m in "${MIRROR_PUBLIC[@]}"; do tries+=("${m%/}/${url}"); done
