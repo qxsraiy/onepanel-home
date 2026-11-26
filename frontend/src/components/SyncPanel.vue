@@ -41,6 +41,16 @@ async function loadNodeStats() {
   } catch { /* 忽略 */ }
 }
 /** 按 nodeId 找状态：本机返回 self，其他在 nodes 里找 */
+/** nodeId -> 状态对象（给拓扑图用） */
+const nodeStatsMap = computed(() => {
+  const out = {}
+  const s = nodeStats.value
+  if (!s) return out
+  if (s.self && s.self.nodeId) out[s.self.nodeId] = { ...s.self, online: true }
+  for (const n of (s.nodes || [])) out[n.nodeId] = n
+  return out
+})
+
 function statsFor(nodeId) {
   const s = nodeStats.value
   if (!s) return null
@@ -319,6 +329,7 @@ onMounted(load);
         :node-id="status?.nodeId || ''"
         :node-name="status?.nodeName || ''"
         :members="otherMembers"
+        :stats="nodeStatsMap"
         @pick="highlightMember"
       />
       <p class="tip">点节点可在下面列表里定位；悬停显示地址与最后同步时间。</p>
@@ -374,31 +385,12 @@ onMounted(load);
           <div
             v-for="m in otherMembers" :key="m.nodeId"
             class="member-row" :class="{ hl: highlighted === m.nodeId }" :data-member="m.nodeId"
-            @mouseenter="hoverNodeId = m.nodeId" @mouseleave="hoverNodeId = ''"
           >
             <span class="dot" :class="m.status"></span>
             <code class="member-id" :title="m.nodeId">{{ m.name || shortId(m.nodeId) }}</code>
             <span class="member-url">{{ m.selfUrls || '—' }}</span>
             <span class="member-time">{{ fmtTime(m.lastSyncAt) }}</span>
 
-            <!-- 悬停状态卡 -->
-            <div v-if="hoverNodeId === m.nodeId" class="node-tip">
-              <div class="nt-head">
-                <span class="nt-name">{{ m.name || shortId(m.nodeId) }}</span>
-                <span class="nt-badge" :class="statsFor(m.nodeId)?.online ? 'on' : 'off'">
-                  {{ statsFor(m.nodeId)?.online ? '在线' : '离线' }}
-                </span>
-              </div>
-              <template v-if="statsFor(m.nodeId)?.online">
-                <div class="nt-row"><span>版本</span><b>v{{ statsFor(m.nodeId)?.version || '—' }}</b></div>
-                <div class="nt-row"><span>CPU</span><b>{{ statsFor(m.nodeId)?.cpu?.usage ?? '—' }}%（{{ statsFor(m.nodeId)?.cpu?.cores }} 核）</b></div>
-                <div class="nt-row"><span>内存</span><b>{{ fmtMem(statsFor(m.nodeId)?.mem) }}</b></div>
-                <div class="nt-row"><span>磁盘</span><b>{{ fmtDisk(statsFor(m.nodeId)?.disk) }}</b></div>
-                <div class="nt-row"><span>已运行</span><b>{{ fmtUptime(statsFor(m.nodeId)?.uptimeSec) }}</b></div>
-              </template>
-              <div v-else class="nt-row"><span>原因</span><b>{{ statsFor(m.nodeId)?.error || '暂无数据' }}</b></div>
-              <div class="nt-row"><span>最后同步</span><b>{{ fmtTime(m.lastSyncAt) }}</b></div>
-            </div>
           </div>
         </div>
 

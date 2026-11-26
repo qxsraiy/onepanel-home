@@ -19,6 +19,8 @@ const props = defineProps({
   nodeId: { type: String, default: '' },
   nodeName: { type: String, default: '' },
   members: { type: Array, default: () => [] },
+  // 【v3.13.3】全网节点状态：nodeId -> { online, version, cpu, mem, disk, uptimeSec, error }
+  stats: { type: Object, default: () => ({}) },
 });
 const emit = defineEmits(['pick']);
 
@@ -71,14 +73,31 @@ const colorOf = (s) => {
 
 /** 悬浮浮条：替代 <title>（桌面要停 1 秒才出，移动端看不到） */
 const hover = ref(null);
-const hoverText = computed(() => {
-  const n = hover.value;
-  if (!n) return '';
-  const parts = [n.label];
-  if (n.selfUrls) parts.push(n.selfUrls);
-  if (n.status === 'offline') parts.push(n.lastError ? '同步失败：' + n.lastError : '已离线');
-  else if (n.lastSyncAt) parts.push('最后同步 ' + new Date(n.lastSyncAt).toLocaleString('zh-CN'));
-  return parts.join(' · ');
+/** 悬停节点的详细状态（结构化，浮条按行渲染） */
+const hoverInfo = computed(() => {
+  const h = hover.value;
+  if (!h) return null;
+  const st = props.stats && props.stats[h.nodeId] ? props.stats[h.nodeId] : null;
+  const g = (v) => (v / 1024 / 1024 / 1024).toFixed(1);
+  const up = (s) => {
+    if (s === undefined || s === null) return '';
+    const d = Math.floor(s / 86400), hr = Math.floor((s % 86400) / 3600), mi = Math.floor((s % 3600) / 60);
+    return (d ? d + '天 ' : '') + hr + '小时 ' + mi + '分';
+  };
+  return {
+    name: h.label || '',
+    online: h.status === 'active',
+    self: !!h.self,
+    urls: h.selfUrls || '',
+    version: st && st.version ? 'v' + st.version : '',
+    cpu: st && st.cpu && st.cpu.usage !== undefined ? st.cpu.usage + '%' + (st.cpu.cores ? '（' + st.cpu.cores + ' 核）' : '') : '',
+    mem: st && st.mem && st.mem.total ? g(st.mem.used) + ' / ' + g(st.mem.total) + ' GB（' + st.mem.percent + '%）' : '',
+    disk: st && st.disk && st.disk.total ? g(st.disk.used) + ' / ' + g(st.disk.total) + ' GB（' + st.disk.percent + '%）' : '',
+    uptime: st ? up(st.uptimeSec) : '',
+    error: (!h.self && st && st.online === false) ? (st.error || '无法连接') : (h.status === 'offline' ? (h.lastError ? '同步失败：' + h.lastError : '已离线') : ''),
+    lastSync: h.lastSyncAt ? '最后同步 ' + relTime(h.lastSyncAt) : '',
+    hasStats: !!(st && st.online),
+  };
 });
 const relTime = (v) => {
   if (!v) return '';
@@ -124,7 +143,7 @@ const orbit = computed(() => radius.value);
         stroke="var(--theme-accent, #3b82f6)" stroke-width="1" stroke-opacity=".35" class="topo-breathe" />
 
       <!-- ⑤ 本机：SVG 图标代替 Unicode -->
-      <g class="topo-self" @mouseenter="hover = { label: selfName, selfUrls: '', status: 'active' }" @mouseleave="hover = null">
+      <g class="topo-self" @mouseenter="hover = { nodeId: props.nodeId, label: selfName, selfUrls: '', status: 'active', self: true }" @mouseleave="hover = null">
         <circle :cx="CX" :cy="CY" r="26"
           fill="color-mix(in srgb, var(--theme-bg, #0f172a) 90%, transparent)"
           stroke="var(--theme-accent, #3b82f6)" stroke-width="2" />
@@ -154,8 +173,26 @@ const orbit = computed(() => radius.value);
       </text>
     </svg>
 
-    <!-- ⑦ 内置浮条 -->
-    <div class="topo-tip" :class="{ show: !!hoverText }">{{ hoverText || '悬停节点查看地址与同步时间' }}</div>
+    <!-- ⑦ 内置浮条：悬停节点显示该节点的完整状态 -->
+    <div class="topo-tip" :class="{ show: !!hoverInfo, off: hoverInfo && !hoverInfo.online }">
+      <template v-if="hoverInfo">
+        <div class="tt-head">
+          <span class="tt-name">{{ hoverInfo.name }}{{ hoverInfo.self ? '（本机）' : '' }}</span>
+          <span class="tt-badge" :class="hoverInfo.online ? 'on' : 'off'">{{ hoverInfo.online ? '在线' : '离线' }}</span>
+        </div>
+        <div v-if="hoverInfo.urls" class="tt-url">{{ hoverInfo.urls }}</div>
+        <div v-if="hoverInfo.hasStats" class="tt-grid">
+          <div v-if="hoverInfo.version"><span>版本</span><b>{{ hoverInfo.version }}</b></div>
+          <div v-if="hoverInfo.cpu"><span>CPU</span><b>{{ hoverInfo.cpu }}</b></div>
+          <div v-if="hoverInfo.mem"><span>内存</span><b>{{ hoverInfo.mem }}</b></div>
+          <div v-if="hoverInfo.disk"><span>磁盘</span><b>{{ hoverInfo.disk }}</b></div>
+          <div v-if="hoverInfo.uptime"><span>已运行</span><b>{{ hoverInfo.uptime }}</b></div>
+        </div>
+        <div v-else-if="hoverInfo.error" class="tt-err">{{ hoverInfo.error }}</div>
+        <div v-if="hoverInfo.lastSync" class="tt-sync">{{ hoverInfo.lastSync }}</div>
+      </template>
+      <span v-else class="tt-idle">悬停节点查看状态</span>
+    </div>
 
     <!-- ⑧ 图例收进角落 -->
     <div class="topo-legend">
@@ -198,6 +235,19 @@ const orbit = computed(() => radius.value);
 }
 
 /* ⑦ 浮条 */
+.tt-head { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+.tt-name { font-weight: 600; font-size: 12px; }
+.tt-badge { font-size: 9.5px; padding: 1px 6px; border-radius: 999px; }
+.tt-badge.on { background: color-mix(in srgb, #10b981 22%, transparent); color: #10b981; }
+.tt-badge.off { background: color-mix(in srgb, #f87171 22%, transparent); color: #f87171; }
+.tt-url { font-size: 10.5px; opacity: .45; font-family: ui-monospace, monospace; margin-bottom: 5px; word-break: break-all; }
+.tt-grid { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; }
+.tt-grid > div { display: flex; gap: 6px; }
+.tt-grid span { opacity: .5; }
+.tt-grid b { font-weight: 500; }
+.tt-err { font-size: 11px; color: #f87171; opacity: .9; }
+.tt-sync { font-size: 10.5px; opacity: .4; margin-top: 4px; }
+.tt-idle { font-size: 11.5px; opacity: .55; }
 .topo-tip {
   margin-top: 4px; text-align: center; font-size: 10.5px;
   color: var(--theme-color); opacity: .42;
