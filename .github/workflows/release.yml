@@ -54,7 +54,7 @@ jobs:
           cp -r shared "dist/$OUT/shared" 2>/dev/null || true
           # 扩展源码必须在包内，否则「下载扩展包」接口 404
           cp -r browser-extension "dist/$OUT/browser-extension" 2>/dev/null || true
-          cp start.sh upgrade.sh install.sh manage.sh "dist/$OUT/" 2>/dev/null || true
+          cp op.sh start.sh upgrade.sh "dist/$OUT/" 2>/dev/null || true
           # schema.sql 必须进包，否则新库建不了表
           mkdir -p "dist/$OUT/backend/bin"
           cp backend/bin/schema.sql "dist/$OUT/backend/bin/schema.sql" 2>/dev/null || true

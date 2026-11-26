@@ -1,40 +1,30 @@
 # OnePanel · 个人数字枢纽
 
-> 私人书签仪表盘 · 多节点自动同步 · 端到端加密 · 支持手机桌面小组件
+> 私人书签仪表盘 · 多节点自动同步 · 端到端加密 · 手机桌面小组件
 
-**本仓库只放正式版本。** 开发过程、审计记录、临时脚本一律不进这里。
-包含**当前版本的源码快照**（`backend/` + `frontend/`），供 CI 自动构建三架构发布包。
+**本仓库只放正式版本。** 包含当前版本的源码快照，供 CI 构建发布包。
 
-当前版本：**v3.11.3** · 默认端口 **5266**
-
----
-
-## 三种安装方式
-
-| 方式 | 命令 | 自动升级 | 自动回滚 |
-|---|---|---|---|
-| **① 脚本（推荐）** | `curl ... | bash` 或 `bash install.sh` 出菜单 | ✅ | ✅ |
-| **② Docker** | `docker compose up -d` | 手动 pull | 手动 |
-| **③ 便携包** | 下载 zip 解压即用（Windows） | 手动替换 | 手动 |
+当前版本：**v3.14.1** · 默认端口 **5266**
 
 ---
 
-## ① 脚本安装
+## 🚀 安装（唯一方式：op.sh）
 
-### 一键安装（无交互）
+### 第一步：下载 op.sh
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/qxsraiy/onepanel-home/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/qxsraiy/onepanel-home/main/op.sh -o /root/op.sh
 ```
 
-### 带菜单的管理脚本（推荐）
+> **不要用 jsDelivr 的 `@main`**（有 12 小时缓存，会拿到旧版）。
+
+### 第二步：运行
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/qxsraiy/onepanel-home/main/install.sh -o /root/op.sh
 bash /root/op.sh
 ```
 
-会显示：
+会显示菜单：
 
 ```
 ╔══════════════════════════════════════════════╗
@@ -50,11 +40,14 @@ bash /root/op.sh
 ║  8) 开启/关闭自动更新                         ║
 ║  0) 退出                                      ║
 ╚══════════════════════════════════════════════╝
+  请选择 [0-8]:
 ```
 
-选 **1** 后逐项询问：
+选 **1**，然后逐项确认：
 
 ```
+  ── 安装配置（直接回车 = 用 [ ] 里的默认值）──
+
   ① 服务端口 [5266]:
   ② 安装目录 [/opt/onepanel]:
   ③ 数据目录（升级不影响）[/var/lib/onepanel]:
@@ -73,51 +66,121 @@ bash /root/op.sh
   确认开始安装？[Y/n]:
 ```
 
-### install.sh 参数（非交互直接用）
+装完输出：
+
+```
+✅ 安装完成！
+
+  访问地址：http://<本机IP>:5266
+  默认账号：admin
+  默认密码：123456（首次登录会强制改密）
+```
+
+**op.sh 装了之后不要删** —— 它就是这台机器的管理面板，以后升级/改端口/看日志都靠它。
+
+### 只用参数（不进菜单）
+
+```bash
+bash /root/op.sh --port 8080 --auto-update          # 指定端口 + 自动更新
+bash /root/op.sh --pkg /root/onepanel-3.14.1-linux-x64.tar.gz   # 用本地包
+bash /root/op.sh --dir /data/onepanel --data /data/onepanel-data
+```
 
 | 参数 | 说明 | 默认 |
 |---|---|---|
-| `--port N` | 服务端口 | **5266** |
-| `--dir PATH` | 安装目录 | `/opt/onepanel` |
-| `--data PATH` | 数据目录（升级不动） | `/var/lib/onepanel` |
+| `--port N` | 服务端口 | 5266 |
+| `--dir PATH` | 安装目录 | /opt/onepanel |
+| `--data PATH` | 数据目录（升级不动） | /var/lib/onepanel |
 | `--auto-update` | 创建自动更新计划任务 | 关闭 |
 | `--no-systemd` | 不注册 systemd | — |
 | `--version X.Y.Z` | 安装指定版本 | 最新 |
-| `--pkg FILE` | **用本地安装包**（国内最稳） | — |
+| `--pkg FILE` | 用本地安装包（国内最稳） | — |
 | `--url URL` | 从指定地址下载包 | — |
 
-### 国内网络说明
+---
 
-**GitHub Release 的 86MB 包在国内经常下载不动**。三个办法：
+## 📦 网络不好 / 包下载不动
 
-```bash
-# ① 用浏览器/IDM/迅雷下载包，再 scp 上去（最稳）
-scp onepanel-3.11.3-linux-x64.tar.gz root@服务器:/root/
-bash /root/op.sh --pkg /root/onepanel-3.11.3-linux-x64.tar.gz
-
-# ② 指定镜像下载脚本（包还是要上面那种方式）
-curl -fsSL https://ghfast.top/https://raw.githubusercontent.com/qxsraiy/onepanel-home/main/install.sh -o /root/op.sh
-
-# ③ 服务器有代理
-export https_proxy=http://127.0.0.1:7890
-curl -fsSL https://raw.githubusercontent.com/qxsraiy/onepanel-home/main/install.sh | bash
-```
-
-> **不要用 jsDelivr 的 `@main`**：它有 12 小时缓存，会拿到旧版脚本。
-> 要用 jsDelivr 就指定 tag：`@v3.11.3`
-
-### 自动更新
-
-**普通 Linux**（自动写 crontab）：
+GitHub Release 的 86MB 包在国内经常超时。用浏览器下载后传上去：
 
 ```bash
-bash install.sh --auto-update        # 或安装向导里选 y
-crontab -l                           # 能看到这条
+# ① 电脑浏览器下载（能走代理、多线程）
+# https://github.com/qxsraiy/onepanel-home/releases/latest
+
+# ② scp 到服务器
+scp onepanel-*-linux-x64.tar.gz* root@服务器:/root/
+
+# ③ 用本地包安装（完全不联网）
+bash /root/op.sh --pkg /root/onepanel-3.14.1-linux-x64.tar.gz
 ```
 
-**宝塔面板**（宝塔有独立任务库，不读系统 crontab，还会覆盖它）：
+**架构自动识别**：
 
-安装脚本检测到宝塔会自动提示。请手动添加：
+| 你的机器 `uname -m` | 自动选 |
+|---|---|
+| x86_64 / amd64 | `linux-x64` |
+| aarch64 / arm64 / armv8l | `linux-arm64` |
+| armv7l / armhf（32 位 ARM） | ❌ 提示改用 Docker |
+| Alpine（musl libc） | ❌ 提示改用 Docker |
+
+**系统没有 Node 18+ 会自动下载**官方 Node 22 到 `/opt/onepanel/runtime/node/`。
+
+---
+
+## 🔄 升级
+
+```bash
+bash /root/op.sh          # 选 1（对比版本，有新版就升级）
+```
+
+或直接用升级脚本：
+
+```bash
+bash /opt/onepanel/current/upgrade.sh                        # 升级
+bash /opt/onepanel/current/upgrade.sh --check                # 只检查
+bash /opt/onepanel/current/upgrade.sh --rollback             # 回滚
+bash /opt/onepanel/current/upgrade.sh --pkg /root/xxx.tar.gz # 本地包升级
+```
+
+**升级流程**：
+
+```
+查最新 → 比对版本 → 下载 → sha256 校验 → 解压新目录
+→ 原子切换软链接 → 重启 → 20 次健康检查
+   ✅ 成功 → 清理旧版本（保留 2 份）
+   ❌ 失败 → 自动切回旧版本 + 重启
+```
+
+**目录结构**：
+
+```
+/opt/onepanel/
+  ├─ current -> versions/3.14.1     ← 软链接，原子切换
+  ├─ versions/
+  │    ├─ 3.14.0/                   ← 保留 2 个用于回滚
+  │    └─ 3.14.1/
+  ├─ runtime/node/                  ← 系统没 Node 时自动下载
+  └─ onepanel.env                   ← 端口/域名配置
+
+/var/lib/onepanel/                  ← 数据目录（升级永不触碰）
+  └─ onepanel.db
+```
+
+---
+
+## ⏰ 自动更新
+
+### 普通 Linux
+
+安装时选「开启每日自动检查更新」，或菜单第 8 项。
+
+```bash
+crontab -l    # 能看到这条
+```
+
+### 宝塔面板
+
+**宝塔有独立任务库，不读系统 crontab，还会覆盖它。** 安装脚本检测到宝塔会自动提示，请手动添加：
 
 ```
 宝塔 → 计划任务 → 添加任务
@@ -127,19 +190,96 @@ crontab -l                           # 能看到这条
   脚本内容：bash /opt/onepanel/current/upgrade.sh --auto
 ```
 
-### 升级 / 回滚
+---
 
-```bash
-bash /opt/onepanel/current/upgrade.sh            # 升级
-bash /opt/onepanel/current/upgrade.sh --check    # 只检查
-bash /opt/onepanel/current/upgrade.sh --rollback # 回滚
+## 🌐 域名 + HTTPS（反代）
+
+**推荐：Cloudflare 小黄云 + 源站证书**
+
+```
+用户 → https://panel.xtay.cn（CF 的 443，不需要备案）
+     → CF 回源到你的服务器 8443（非标端口，云厂商不封）
 ```
 
-升级流程：查最新 → 比对版本 → 下载 → sha256 校验 → 解压新目录 → 原子切换软链接 → 重启 → 20 次健康检查 → **失败自动切回旧版本**。保留 2 个旧版本。
+### Cloudflare 后台
+
+1. DNS 加 A 记录 `panel` → 服务器 IP，**开小黄云**
+2. SSL/TLS → Origin Server → Create Certificate → 保存证书和私钥
+3. SSL/TLS → Overview → **Full (strict)**
+4. SSL/TLS → Edge Certificates → Always Use HTTPS 开启
+5. Rules → Origin Rules → 回源端口改成 **8443**
+
+### 宝塔后台
+
+1. 网站 → 添加站点 → 域名填 `panel.xtay.cn`（**不带端口**）→ 纯静态
+2. 设置 → SSL → **其他证书** → 粘贴 CF 的证书和私钥 → 保存
+3. 设置 → 配置文件 → 把 `listen 443 ssl` 改成 `listen 8443 ssl`
+4. 设置 → 反向代理 → 添加 → 目标 `http://127.0.0.1:5266` → 发送域名 `$host`
+5. 设置 → 反向代理 → onepanel → 配置文件 → **补一行**：
+
+   ```nginx
+   proxy_set_header X-Forwarded-Proto $scheme;
+   ```
+
+6. 安全 → 防火墙 → 放行 8443
+7. **云厂商安全组也要放行 8443**（最容易漏）
+
+### 后端配置（只有第一台要配）
+
+```bash
+# 宝塔 → 文件 → /opt/onepanel/onepanel.env
+COOKIE_DOMAIN=.xtay.cn
+WEBAUTHN_RP_ID=xtay.cn
+```
+
+```bash
+systemctl restart onepanel
+```
+
+> 后加的节点入网时自动继承这两个值，不用配。
 
 ---
 
-## ② Docker
+## 🌍 多节点部署
+
+### 第一台（配置源头）
+
+```
+装好 → 配 Nginx 反代 → 在 onepanel.env 里配 COOKIE_DOMAIN / WEBAUTHN_RP_ID → 重启
+```
+
+### 第二台起
+
+```
+装好 → 配 Nginx 反代 → 登录 → 设置 → 共享网络 → 入网
+     → 域名配置自动继承，什么都不用配
+```
+
+**加第 N 台节点时，老节点一个字都不用改。**
+
+### 入网方式
+
+| 方式 | 需要人工批准 | 说明 |
+|---|---|---|
+| **配对串**（二维码/授权码） | ❌ 不用 | 生成一次性码本身就是授权动作 |
+| **账号密码** | ✅ 需要 | 老节点面板弹「待批准的入网请求」，点批准才放行 |
+
+**安全设计**：
+
+- 登录页不会显示「重新选择」，已初始化的节点无法被重置
+- 账号密码入网必须老节点管理员点批准（防密码泄露被人抢注空库）
+- 待批准请求 5 分钟超时，老节点重启即失效
+
+### 已入网但域名配置是空的（升级到 v3.14.1 后）
+
+```
+自动：启动后 8 秒向已入网节点要一次
+手动：设置 → 共享网络 → 网络域名配置 → [从其他节点自动拉取]
+```
+
+---
+
+## 🐳 Docker 部署
 
 ```bash
 git clone https://github.com/qxsraiy/onepanel-home.git
@@ -153,72 +293,69 @@ docker compose up -d
 
 ---
 
-## ③ 便携包（Windows）
-
-去 [Releases](../../releases) 下载 `onepanel-portable-v*-win-x64.zip`，解压双击启动。
-
-升级：下载新 zip，把旧 `data/` 拷过去。
-
----
-
-## 目录结构（脚本版）
-
-```
-/opt/onepanel/
-  ├─ current -> versions/3.11.3     ← 软链接，原子切换
-  ├─ versions/
-  │    ├─ 3.11.2/                   ← 保留 2 个用于回滚
-  │    └─ 3.11.3/
-  ├─ runtime/node/                  ← 系统没 Node 时自动下载
-  └─ onepanel.env                   ← 端口/域名配置
-
-/var/lib/onepanel/                  ← 数据目录（升级永不触碰）
-  └─ onepanel.db
-```
-
----
-
-## 首次登录
+## 💻 首次登录
 
 ```
 账号：admin
-密码：123456        ← 首次登录强制改密（≥8 位，含数字或符号）
+密码：123456      ← 首次登录强制改密（≥8 位，含数字或符号）
 ```
 
 ---
 
-## 多节点部署
+## 🧩 浏览器扩展
 
-节点之间通过「设置 → 共享网络」配对入网。建议所有节点配同一个父域的 HTTPS 域名，并在 `onepanel.env` 里加：
-
-```bash
-COOKIE_DOMAIN=.yourdomain.com
-COOKIE_SECURE=1
-WEBAUTHN_RP_ID=yourdomain.com
-WEBAUTHN_HOSTS=cn.yourdomain.com,us.yourdomain.com,panel.yourdomain.com
+```
+面板 → 设置 → 浏览器扩展 → 下载扩展包（zip）
+→ 解压到固定目录
+→ chrome://extensions → 开发者模式 → 加载已解压的扩展程序
+→ 点扩展图标 → 填节点地址 + Token（设置 → API 接口 生成）
 ```
 
-这样登录态（Cookie）与 Passkey 可跨节点通用。
+扩展会**自动读取你在面板里设置的主题色**，外观与网页端一致。
 
 ---
 
-## 版本历史
+## 📊 全网节点状态
 
-| 版本 | 说明 |
+```
+设置 → 共享网络 → 网络拓扑
+```
+
+鼠标悬停任意节点圆圈，底部浮条显示：
+
+- 在线/离线
+- 版本号
+- CPU 占用 + 核心数
+- 内存使用
+- 磁盘使用
+- 已运行时长
+- 最后同步时间
+
+---
+
+## 📄 版本历史
+
+| 版本 | 主要变更 |
 |---|---|
-| **v3.11.3** | ✅ 当前版本。包内容完整（schema.sql + backend/public + 全部依赖 + Prisma 引擎） |
-| v3.11.2 | 修 systemd 直接用 node 启动，但包缺前端产物 |
-| v3.11.1 | 补 schema.sql，但 systemd 依赖包内不存在的 manage.sh |
-| v3.11.0 | 首个发布，包缺 schema.sql 导致启动失败 |
-
-> v3.11.0 ~ v3.11.2 已删除（安装包不完整），**请只用 v3.11.3**。
+| **v3.14.1** | 已入网节点可从网络自动拉取域名配置 |
+| v3.14.0 | 网络域名配置入网自动继承 |
+| v3.13.5 | 主题强调色选框与上一行对齐 |
+| v3.13.4 | 强调色改用标准 color-picker |
+| v3.13.3 | 节点状态卡移到网络拓扑图 |
+| v3.13.2 | 全网节点状态汇总 |
+| v3.13.1 | 打包带扩展目录 + 段间距 |
+| v3.13.0 | 入网需人工批准（账号密码方式） |
+| v3.12.1 | 登录页安全修复 |
+| v3.12.0 | 浏览器扩展重做（跟随主题） |
+| v3.11.3 | 修复安装包缺前端产物 |
+| v3.11.0 | 三种安装方式 + 升级接口 |
 
 ---
 
-## 技术栈
+## 🛠 技术栈
 
-- 后端：Node 22 + Express 5 + Prisma/SQLite
-- 前端：Vue 3 + Vite
-- 加密：AES-256-GCM（卡片内容）、scrypt（密码派生）、Ed25519（节点签名）
-- 同步：HLC + StateVector 增量同步，墓碑优先 LWW
-- 认证：JWT + HttpOnly Cookie（跨子域共享）+ TOTP 2FA + Passkey（PRF 指纹解锁保险库）
+- **后端**：Node 22 + Express 5 + Prisma/SQLite
+- **前端**：Vue 3 + Vite
+- **加密**：AES-256-GCM（卡片）、scrypt（密码派生）、Ed25519（节点签名）
+- **同步**：HLC + StateVector 增量同步，墓碑优先 LWW
+- **认证**：JWT + HttpOnly Cookie（跨子域共享）+ TOTP 2FA + Passkey（PRF 指纹解锁）

@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # ======================================================================
-#  OnePanel 一键安装脚本
+#  OnePanel 安装与管理脚本（唯一入口）
+#  安装：bash op.sh
+#  之后所有管理操作都在这个菜单里（升级/卸载/改端口/状态/日志/回滚/自动更新）
 # ----------------------------------------------------------------------
 #  用法：
-#    curl -fsSL https://raw.githubusercontent.com/qxsraiy/onepanel-home/main/install.sh | bash
-#  或：
-#    wget -qO- .../install.sh | bash -s -- --port 5266 --dir /opt/onepanel
-#
+#    curl -fsSL https://raw.githubusercontent.com/qxsraiy/onepanel-home/main/op.sh -o /root/op.sh
+#    bash /root/op.sh
+#  参数模式：
+#    bash /root/op.sh --port 5266 --dir /opt/onepanel --auto-update
 #  参数：
 #    --port N        服务端口（默认 5266，被占用会自动建议下一个）
 #    --dir PATH      安装目录（默认 /opt/onepanel）
@@ -79,10 +81,8 @@ log() { echo -e "\033[36m[onepanel]\033[0m $*"; }
 err() { echo -e "\033[31m[错误]\033[0m $*" >&2; }
 
 # ======================================================================
-#  交互菜单：直接执行 bash install.sh 时进入；curl | bash 时跳过
+#  交互菜单：直接执行 bash op.sh 时进入；curl | bash 时跳过
 # ======================================================================
-is_tty() { [ -t 0 ] && [ -t 1 ]; }
-
 # ---------- 安装向导：逐项询问 ----------
 port_in_use() {
   (command -v ss >/dev/null && ss -ltn 2>/dev/null | grep -q ":$1 ") || \
@@ -328,8 +328,8 @@ run_menu() {
   done
 }
 
-# 有显式参数 或 非交互管道 -> 跳过菜单，直接安装
-if is_tty && [ $# -eq 0 ]; then
+# 有显式参数（--pkg/--port/--version 等）时直接安装，否则一律进菜单
+if [ $# -eq 0 ]; then
   run_menu
 fi
 
@@ -406,7 +406,7 @@ else
   RESP="$(gh_text "$API" || true)"
   if [ -z "$RESP" ]; then
     err "无法访问 GitHub（直连与镜像均失败）"
-    err "解决：① GH_PROXY=https://ghfast.top bash install.sh   ② 手动下载后用 --pkg 指定"
+    err "解决：① GH_PROXY=https://ghfast.top bash op.sh   ② 手动下载后用 --pkg 指定"
     exit 1
   fi
   if echo "$RESP" | grep -q "Not Found"; then
@@ -438,7 +438,7 @@ echo ""
 if [ -z "${LOCAL_PKG:-}" ] && [ -z "${PKG_URL:-}" ]; then
   echo "  ⚠️  国内直连 GitHub Release 下载 86MB 包通常会超时。"
   echo "     如果下面卡住请 Ctrl+C，用浏览器下载上面的直链后执行："
-  echo "       bash install.sh --pkg /path/to/$ASSET"
+  echo "       bash op.sh --pkg /path/to/$ASSET"
   echo ""
 fi
 log "下载 $ASSET …"
@@ -451,7 +451,7 @@ elif [ -n "${PKG_URL:-}" ]; then
     err "指定地址下载失败：$PKG_URL"; exit 1; }
 else
   gh_fetch "$URL" "$TMP/pkg.tar.gz" 600 || { err "下载失败：$URL"
-    err "可手动下载后用：bash install.sh --pkg /path/to/$ASSET"; exit 1; }
+    err "可手动下载后用：bash op.sh --pkg /path/to/$ASSET"; exit 1; }
 fi
 
 if gh_fetch "$SHA_URL" "$TMP/pkg.sha256" 20 2>/dev/null; then
@@ -533,7 +533,7 @@ EOF
   systemctl restart onepanel
   log "已注册 systemd 服务：onepanel"
 else
-  log "跳过 systemd（用 manage.sh start 手动启动）"
+  log "跳过 systemd（用 op.sh start 手动启动）"
 fi
 
 # ---------- 10. 自动更新计划任务 ----------
