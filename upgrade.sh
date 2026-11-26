@@ -81,13 +81,6 @@ gh_text() {
   done
   return 1
 }
-gh_text() {
-  local url="$1" m r
-  for m in "${MIRRORS[@]}"; do
-    r="$(curl --http1.1 -fsSL --connect-timeout 10 --max-time 25 "${m}${url}" 2>/dev/null)" && { echo "$r"; return 0; }
-  done
-  return 1
-}
 
 log()  { echo -e "\033[36m[upgrade]\033[0m $*"; }
 warn() { echo -e "\033[33m[警告]\033[0m $*"; }

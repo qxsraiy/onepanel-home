@@ -134,14 +134,6 @@ gh_text() {
   return 1
 }
 
-# 带镜像回退的文本读取：gh_text <原始URL>
-gh_text() {
-  local url="$1" m r
-  for m in "${GITHUB_MIRRORS[@]}"; do
-    r="$(curl --http1.1 -fsSL --connect-timeout 10 --max-time 25 "${m}${url}" 2>/dev/null)" && { echo "$r"; return 0; }
-  done
-  return 1
-}
 log() { echo -e "\033[36m[onepanel]\033[0m $*"; }
 err() { echo -e "\033[31m[错误]\033[0m $*" >&2; }
 
@@ -455,7 +447,6 @@ else
 fi
 
 # ---------- 2. 端口检查 ----------
-port_in_use() { (command -v ss >/dev/null && ss -ltn 2>/dev/null | grep -q ":$1 ") || (command -v netstat >/dev/null && netstat -ltn 2>/dev/null | grep -q ":$1 "); }
 if port_in_use "$PORT"; then
   ORIG=$PORT
   while port_in_use "$PORT"; do PORT=$((PORT+1)); done
