@@ -42,14 +42,15 @@ gh_fetch() {
   local -a cn=() gl=() pub=() tries=()
   case "$url" in
     https://github.com/*)
-      cn+=("${MIRROR_SELF%/}/${url#https://github.com/}")
-      gl+=("${MIRROR_SELF%/}/${url#https://github.com/}")
+      # Gitee 在国内最快，排第一；自建镜像作第二
       case "$url" in
         https://github.com/qxsraiy/onepanel-home/*)
           cn+=("${GITEE_BASE}/${url#https://github.com/qxsraiy/onepanel-home/}")
           gl+=("${GITEE_BASE}/${url#https://github.com/qxsraiy/onepanel-home/}")
           ;;
       esac
+      cn+=("${MIRROR_SELF%/}/${url#https://github.com/}")
+      gl+=("${MIRROR_SELF%/}/${url#https://github.com/}")
       ;;
     https://api.github.com/*)
       cn+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}")

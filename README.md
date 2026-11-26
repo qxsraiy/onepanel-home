@@ -39,9 +39,9 @@ bash /root/op.sh
 
 启动时探测网络（4 秒内能否访问 gitee.com），决定优先级：
 
-**国内**：`down.xtay.cn` → `Gitee` → 公共镜像 → GitHub
+**国内**：`Gitee`（第一优先）→ `down.xtay.cn` → 公共镜像 → GitHub
 
-**海外**：`GitHub` → 公共镜像 → `down.xtay.cn` → Gitee
+**海外**：`GitHub`（第一优先）→ 公共镜像 → `down.xtay.cn` → Gitee
 
 任意源失败自动试下一个，日志会显示实际用的是哪个：
 

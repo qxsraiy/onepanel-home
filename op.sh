@@ -76,19 +76,21 @@ gh_fetch() {
   local -a cn_tries=()   # 国内优先序列
   local -a gl_tries=()   # 海外优先序列
 
-  # 各源的候选地址（三种规则）
+  # 各源的候选地址（按环境决定顺序）
   case "$url" in
     https://github.com/*)
-      cn_tries+=("${MIRROR_SELF%/}/${url#https://github.com/}")
-      gl_tries+=("${MIRROR_SELF%/}/${url#https://github.com/}")
+      # Gitee 在国内实测最快，排第一；自建镜像作第二
       case "$url" in
         https://github.com/qxsraiy/onepanel-home/*)
           cn_tries+=("${GITEE_BASE}/${url#https://github.com/qxsraiy/onepanel-home/}")
           gl_tries+=("${GITEE_BASE}/${url#https://github.com/qxsraiy/onepanel-home/}")
           ;;
       esac
+      cn_tries+=("${MIRROR_SELF%/}/${url#https://github.com/}")
+      gl_tries+=("${MIRROR_SELF%/}/${url#https://github.com/}")
       ;;
     https://api.github.com/*)
+      # API 走自建镜像的 /api 转发（Gitee 没有 API 代理）
       cn_tries+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}")
       gl_tries+=("${MIRROR_SELF%/}/api/${url#https://api.github.com/}")
       ;;
