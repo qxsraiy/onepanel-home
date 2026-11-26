@@ -2225,10 +2225,10 @@ app.post('/api/passkey/register/verify', authenticateToken, ah(async (req, res) 
     );
     // 【v3.9.5】Passkey 同步：让其他节点也认得这条凭据
     try {
-      const pv = require('./services/prfVault');
+      // prfWrapped 不广播：PRF 是每台设备各自的指纹派生物，同步过去用不了
       await recordSideChange('config', String(credentialId), 'passkey-upsert', {
         credentialId: String(credentialId), publicKey, counter,
-        label: String(label || '我的通行密钥').slice(0, 40), prfWrapped,
+        label: String(label || '我的通行密钥').slice(0, 40),
       });
       syncEngine.kick && syncEngine.kick();
     } catch (e) { console.warn('广播 Passkey 失败:', e.message); }

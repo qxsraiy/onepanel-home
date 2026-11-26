@@ -383,6 +383,18 @@ async function applyChange(change) {
     } else if (change.op === 'passkey-upsert' || change.op === 'passkey-delete') {
       // 【v3.9.5】Passkey 同步：让每条凭据在所有节点都可识别
       try {
+        // 【v3.28.0】接收端可能还没有 Passkey 表（新节点从未打开过通行密钥页），
+        // 不先建表的话 INSERT 会静默失败 → 表现为"一个节点有、另一个没有"。
+        await db().$executeRawUnsafe(
+          'CREATE TABLE IF NOT EXISTS Passkey ('
+          + 'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+          + 'credentialId TEXT NOT NULL UNIQUE,'
+          + 'publicKey TEXT NOT NULL,'
+          + 'counter INTEGER NOT NULL DEFAULT 0,'
+          + 'label TEXT DEFAULT \'\','
+          + 'createdAt TEXT NOT NULL DEFAULT (datetime(\'now\')),'
+          + 'prfWrapped TEXT)'
+        ).catch(() => {});
         const info = JSON.parse(change.payload || ' {}');
         const id = String(info.credentialId || change.uid || '');
         if (!id) {
@@ -391,10 +403,15 @@ async function applyChange(change) {
           await db().$executeRawUnsafe('DELETE FROM Passkey WHERE credentialId = ?', id).catch(() => {});
           result = { applied: true, reason: 'passkey-deleted' };
         } else {
+          // 【v3.28.0】prfWrapped 不跨设备同步：
+          // PRF 派生依赖认证器内部密钥，另一台的指纹派生结果不同，同步过来也解不开；
+          // 若直接覆盖还会把本机原本能用的包裹冲掉。
+          // 这里只更新凭据本体（让登录验签可用），prfWrapped 保留本地已有值。
           await db().$executeRawUnsafe(
-            'INSERT OR REPLACE INTO Passkey (credentialId, publicKey, counter, label, prfWrapped) VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO Passkey (credentialId, publicKey, counter, label, prfWrapped) VALUES (?, ?, ?, ?, NULL) '
+            + 'ON CONFLICT(credentialId) DO UPDATE SET publicKey = excluded.publicKey, counter = excluded.counter, label = excluded.label',
             id, String(info.publicKey || ''), Number(info.counter) || 0,
-            String(info.label || '我的通行密钥').slice(0, 40), info.prfWrapped || null
+            String(info.label || '我的通行密钥').slice(0, 40)
           ).catch(() => {});
           result = { applied: true, reason: 'passkey-upserted' };
         }
