@@ -5,7 +5,7 @@
  * 设计原则：默认只看两件事——"邀请新设备"的两个按钮。
  * 成员表 / 拓扑 / 手动同步 / 踢人 全部收进折叠区，不打扰普通使用。
  */
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import axios from 'axios'
 import QRCode from 'qrcode'
 import AppIcon from './AppIcon.vue'
@@ -26,7 +26,36 @@ const selfUrls = ref('');
 const showInvite = ref('');       // '' | qr | code
 const pairQr = ref('');
 const pairText = ref('');
-const showMembers = ref(false);
+const showMembers = ref(false)
+// 【安全 v3.13.0】待批准的入网请求（账号密码方式入网时，必须在这里点批准）
+const joinRequests = ref([])
+let joinReqTimer = null
+async function loadJoinRequests() {
+  try {
+    const { data } = await axios.get('/api/join/requests')
+    joinRequests.value = data.items || []
+  } catch { joinRequests.value = [] }
+}
+async function approveJoin(item) {
+  try {
+    await axios.post('/api/join/approve', { requestId: item.requestId })
+    toast('已批准 ' + String(item.nodeId).slice(0, 6) + ' 入网', 'success')
+    await loadJoinRequests()
+    await load()
+  } catch (e) { toast(e.response?.data?.error || '批准失败', 'error') }
+}
+async function rejectJoin(item) {
+  try {
+    await axios.post('/api/join/reject', { requestId: item.requestId })
+    toast('已拒绝', 'success')
+    await loadJoinRequests()
+  } catch (e) { toast(e.response?.data?.error || '拒绝失败', 'error') }
+}
+onMounted(() => {
+  loadJoinRequests()
+  joinReqTimer = setInterval(loadJoinRequests, 5000)
+})
+onUnmounted(() => { if (joinReqTimer) clearInterval(joinReqTimer) });
 const showAdvanced = ref(false);
 const peerUrl = ref('');
 const joinForm = ref({ url: '', username: '', password: '', selfUrls: '' });
@@ -224,6 +253,25 @@ onMounted(load);
       </div>
     </div>
 
+    <!-- ===== 待批准的入网请求 ===== -->
+    <div v-if="joinRequests.length" class="setting-block pending-block">
+      <h4><AppIcon icon="mdi:account-alert-outline" /> 待批准的入网请求（{{ joinRequests.length }}）</h4>
+      <p class="tip">有人用账号密码申请加入本网络。确认是你在操作再点批准。</p>
+      <div class="pending-list">
+        <div v-for="r in joinRequests" :key="r.requestId" class="pending-row">
+          <div class="pr-info">
+            <code>{{ String(r.nodeId).slice(0, 8) }}</code>
+            <span class="pr-ip">{{ r.ip || '未知地址' }}</span>
+            <span class="pr-wait">{{ r.waitedSec }} 秒前</span>
+          </div>
+          <div class="pr-actions">
+            <button class="btn-outline danger-mini" @click="rejectJoin(r)">拒绝</button>
+            <button class="btn-primary" @click="approveJoin(r)">批准</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ===== 网络拓扑 ===== -->
     <div class="setting-block">
       <h4><AppIcon icon="mdi:lan-connect" /> 网络拓扑</h4>
@@ -332,6 +380,23 @@ onMounted(load);
 
 <style scoped>
 .sync-pane { padding: 2px; }
+.pending-block {
+  border-color: color-mix(in srgb, #f59e0b 40%, transparent) !important;
+  background: color-mix(in srgb, #f59e0b 6%, transparent);
+}
+.pending-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.pending-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 11px; border-radius: 10px;
+  background: color-mix(in srgb, var(--theme-color) 6%, transparent);
+  font-size: 12px;
+}
+.pr-info { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.pr-info code { font-family: ui-monospace, monospace; font-size: 11.5px; }
+.pr-ip { opacity: .55; font-family: ui-monospace, monospace; font-size: 11px; }
+.pr-wait { margin-left: auto; opacity: .4; font-size: 11px; }
+.pr-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.pr-actions .btn-primary { padding: 5px 14px; font-size: 12px; }
 .setting-block { margin-bottom: 14px; }
 .tip { font-size: 12px; opacity: .55; line-height: 1.7; margin: 6px 0 0; }
 .warn-tip { color: #fbbf24; opacity: .9; }

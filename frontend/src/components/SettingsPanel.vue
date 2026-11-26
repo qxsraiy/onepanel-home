@@ -7,6 +7,7 @@ import SelectBox from './SelectBox.vue'
 import PasskeyPanel from './PasskeyPanel.vue'
 import ApiDocs from './ApiDocs.vue'
 import AboutPanel from './AboutPanel.vue'
+import ExtensionPanel from './ExtensionPanel.vue'
 import GroupManager from './GroupManager.vue'
 import SyncPanel from './SyncPanel.vue'
 import { readJSON, writeText, safeHex, toast } from '../utils/common'
@@ -526,6 +527,7 @@ const handleCloseCheck = async () => {
           <li :class="{ active: activeTab === 'monitor' }" @click="activeTab = 'monitor'"><AppIcon icon="mdi:monitor-dashboard" /> 监控与通知</li>
           <li :class="{ active: activeTab === 'backup' }" @click="activeTab = 'backup'"><AppIcon icon="mdi:cloud-sync-outline" /> 备份与恢复</li>
           <li :class="{ active: activeTab === 'api' }" @click="activeTab = 'api'"><AppIcon icon="mdi:api" /> API 接口</li>
+          <li :class="{ active: activeTab === 'ext' }" @click="activeTab = 'ext'"><AppIcon icon="mdi:puzzle-outline" /> 浏览器扩展</li>
           <li :class="{ active: activeTab === 'about' }" @click="activeTab = 'about'"><AppIcon icon="mdi:information-outline" /> 关于 / 更新</li>
           <li :class="{ active: activeTab === 'sync' }" @click="activeTab = 'sync'"><AppIcon icon="mdi:share-variant-outline" /> 共享网络</li>
         </ul>
@@ -746,6 +748,10 @@ const handleCloseCheck = async () => {
               </div>
             </div>
           </div>
+          <div v-if="activeTab === 'ext'" class="content-area">
+            <ExtensionPanel />
+          </div>
+
           <div v-if="activeTab === 'about'" class="content-area">
             <AboutPanel />
           </div>

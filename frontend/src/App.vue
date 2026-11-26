@@ -37,6 +37,8 @@ const showWizard = ref(false)
 const settingsTab = ref('')
 // 是否选过"单独使用"（登录页据此显示"重新选择"入口）
 const setupSkipped = ref(false)
+// 安全：只有未改过密码且无数据的节点，才允许从登录页退回引导
+const canReenter = ref(false)
 const isFirstLogin = ref(false)
 const tempToken = ref('')
 const loginForm = ref({ username: '', password: '' })
@@ -1458,6 +1460,7 @@ onMounted(async () => {
     const { data } = await axios.get('/api/setup/state');
     showWizard.value = !!data.showWizard;
     setupSkipped.value = !!data.skipped;
+    canReenter.value = !!data.canReenter;
   } catch { showWizard.value = false; }
 
   window.addEventListener('click', closeMenus)
@@ -1543,7 +1546,7 @@ onUnmounted(() => {
           <button class="btn-primary full-w mt-4" style="padding: 12px" @click="handleLogin">登 录</button>
         </div>
 
-        <p v-if="setupSkipped" class="setup-back">
+        <p v-if="setupSkipped && canReenter" class="setup-back">
           这台设备还没加入网络？
           <button class="link-btn" @click="backToSetup">重新选择</button>
         </p>

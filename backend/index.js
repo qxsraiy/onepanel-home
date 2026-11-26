@@ -987,9 +987,9 @@ const joinLimiter = rateLimit({
   message: { error: '加入尝试过于频繁，请 15 分钟后再试' },
 });
 
-function issueJoinToken(nodeId, publicKey) {
+function issueJoinToken(nodeId, publicKey, selfUrls) {
   const token = crypto.randomBytes(24).toString('hex');
-  joinTokens.set(token, { nodeId, publicKey, exp: Date.now() + JOIN_TTL_MS });
+  joinTokens.set(token, { nodeId, publicKey, selfUrls: selfUrls || '', exp: Date.now() + JOIN_TTL_MS });
   // 顺手清理过期
   for (const [k, v] of joinTokens) if (v.exp < Date.now()) joinTokens.delete(k);
   return token;
@@ -1008,6 +1008,25 @@ function consumeJoinToken(token, nodeId) {
  * 老节点侧：新节点凭「管理员账号密码」申请加入。
  * 密码只用于这一次身份证明，老节点不保存任何来自新节点的东西。
  */
+/**
+ * 待批准的入网请求（v3.13.0）
+ * ------------------------------------------------------------------
+ * 【安全】账号密码入网不再立即签发令牌，必须由老节点管理员在面板上点「批准」。
+ * 理由：密码可能是泄露的/被猜到的，但"管理员亲眼看到一台新设备要进来并点了批准"
+ * 是真正的授权动作。
+ * 配对串不走这里——生成一次性码本身就是管理员的授权动作。
+ * 队列存内存：老节点重启即清空，未批准的请求自动失效（安全默认）。
+ */
+const joinPending = new Map();
+const JOIN_PENDING_TTL = 5 * 60 * 1000;
+
+function pruneJoinPending() {
+  const now = Date.now();
+  for (const [id, v] of joinPending) {
+    if (now - v.at > JOIN_PENDING_TTL) joinPending.delete(id);
+  }
+}
+
 app.post('/api/join/request', joinLimiter, ah(async (req, res) => {
   const body = req.body || {};
   const nodeId = String(body.nodeId || '');
@@ -1031,6 +1050,22 @@ app.post('/api/join/request', joinLimiter, ah(async (req, res) => {
       await new Promise((r) => setTimeout(r, 300));
       return res.status(401).json({ error: '账号或密码不正确' });
     }
+    // 【安全 v3.13.0】密码对了也必须人工批准：
+    //   挂起请求，等管理员在「设置 → 共享网络」点批准后才签发令牌。
+    //   配对串不走这里 —— 生成一次性码本身就是管理员的授权动作。
+    pruneJoinPending();
+    const requestId = crypto.randomBytes(12).toString('hex');
+    const ipRaw = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    joinPending.set(requestId, {
+      at: Date.now(), nodeId, publicKey, selfUrls, ip: ipRaw,
+      status: 'pending', token: null,
+    });
+    console.log(`🚪 节点 ${nodeId.slice(0, 6)} 请求加入（来自 ${ipRaw}），等待管理员批准`);
+    return res.status(202).json({
+      pending: true, requestId,
+      expiresInMs: JOIN_PENDING_TTL,
+      message: '请到老节点的「设置 → 共享网络」里点批准',
+    });
   }
   // 配对模式签发的令牌允许在 snapshot 里额外下发主密钥（否则新节点没有密码解不开）
   const token = issueJoinToken(nodeId, publicKey);
@@ -1040,6 +1075,60 @@ app.post('/api/join/request', joinLimiter, ah(async (req, res) => {
   console.log(`🚪 节点 ${nodeId.slice(0, 6)} 申请加入，已签发一次性令牌`);
   // 带上主密钥指纹：新节点用它判断"我们的加密钥匙是不是同一把"
   res.json({ success: true, token, expiresInMs: JOIN_TTL_MS, vaultFingerprint: vault.fingerprint() });
+}));
+
+/** 新节点轮询：请求被批准了吗 */
+app.get('/api/join/pending/:requestId', joinLimiter, ah(async (req, res) => {
+  const id = String(req.params.requestId || '');
+  const rec = joinPending.get(id);
+  if (!rec) return res.status(404).json({ error: '请求不存在或已过期（请重新发起）' });
+  if (Date.now() - rec.at > JOIN_PENDING_TTL) {
+    joinPending.delete(id);
+    return res.status(410).json({ error: '请求已超时（5 分钟），请重新发起' });
+  }
+  if (rec.status === 'rejected') {
+    joinPending.delete(id);
+    return res.status(403).json({ error: '管理员拒绝了这次入网请求' });
+  }
+  if (rec.status === 'approved' && rec.token) {
+    return res.json({ approved: true, token: rec.token, expiresInMs: JOIN_TTL_MS, vaultFingerprint: vault.fingerprint() });
+  }
+  res.json({ pending: true, waitedMs: Date.now() - rec.at, expiresInMs: Math.max(0, JOIN_PENDING_TTL - (Date.now() - rec.at)) });
+}));
+
+/** 管理员：列出待批准的入网请求 */
+app.get('/api/join/requests', authenticateToken, (req, res) => {
+  pruneJoinPending();
+  const items = [...joinPending.entries()]
+    .filter(([, v]) => v.status === 'pending')
+    .map(([id, v]) => ({
+      requestId: id, nodeId: v.nodeId, selfUrls: v.selfUrls, ip: v.ip,
+      waitedSec: Math.round((Date.now() - v.at) / 1000),
+    }));
+  res.json({ items });
+});
+
+/** 管理员：批准 */
+app.post('/api/join/approve', authenticateToken, ah(async (req, res) => {
+  const id = String((req.body || {}).requestId || '');
+  const rec = joinPending.get(id);
+  if (!rec) return res.status(404).json({ error: '请求不存在或已过期' });
+  if (rec.status !== 'pending') return res.status(409).json({ error: '该请求已处理过' });
+  const token = issueJoinToken(rec.nodeId, rec.publicKey, rec.selfUrls);
+  rec.status = 'approved';
+  rec.token = token;
+  console.log(`✅ 已批准节点 ${rec.nodeId.slice(0, 6)} 入网（来自 ${rec.ip}）`);
+  res.json({ success: true });
+}));
+
+/** 管理员：拒绝 */
+app.post('/api/join/reject', authenticateToken, ah(async (req, res) => {
+  const id = String((req.body || {}).requestId || '');
+  const rec = joinPending.get(id);
+  if (!rec) return res.status(404).json({ error: '请求不存在或已过期' });
+  rec.status = 'rejected';
+  console.log(`⛔ 已拒绝节点 ${rec.nodeId.slice(0, 6)} 的入网请求`);
+  res.json({ success: true });
 }));
 
 /** 老节点侧：凭令牌一次性拿全量（items 是密文，另附账号与密钥包裹以便新节点直接可用） */
@@ -1158,7 +1247,33 @@ app.post('/api/join/from', joinLimiter, ah(async (req, res) => {
       body: JSON.stringify({ nodeId: me.nodeId, publicKey: me.publicKeyPem, selfUrls, username: body.username, password: body.password, ...(pairCode ? { pairCode } : {}) }),
       signal: AbortSignal.timeout(10000),
     });
-    const data = await r.json();
+    let data = await r.json();
+    // 【安全 v3.13.0】202 = 对方要求人工批准，轮询等待（最多 5 分钟）
+    if (r.status === 202 && data.pending) {
+      const requestId = data.requestId;
+      const deadline = Date.now() + 5 * 60 * 1000;
+      console.log('⏳ 已发起入网请求，等待老节点管理员批准（最多 5 分钟）…');
+      let approved = null;
+      while (Date.now() < deadline) {
+        await new Promise((rr) => setTimeout(rr, 3000));
+        try {
+          const pr = await fetch(url + '/api/join/pending/' + encodeURIComponent(requestId), {
+            signal: AbortSignal.timeout(10000),
+          });
+          const pj = await pr.json();
+          if (pr.status === 403) return res.status(403).json({ error: pj.error || '管理员拒绝了入网请求' });
+          if (pr.status === 410 || pr.status === 404) return res.status(410).json({ error: pj.error || '请求已过期，请重新发起' });
+          if (pj.approved && pj.token) { approved = pj; break; }
+        } catch { /* 网络抖动继续轮询 */ }
+      }
+      if (!approved) {
+        return res.status(408).json({
+          error: '等待管理员批准超时（5 分钟）。请到老节点「设置 → 共享网络」点批准，或改用「显示授权码」入网',
+          code: 'APPROVAL_TIMEOUT',
+        });
+      }
+      data = approved;
+    }
     if (!r.ok) return res.status(r.status).json({ error: data.error || '对方拒绝加入' });
     token = data.token;
     vaultFingerprintFromToken = String(data.vaultFingerprint || '');
@@ -1429,20 +1544,31 @@ app.get('/api/backup/blob/status', authenticateToken, ah(async (req, res) => {
  * 这几个接口必须免登录：新设备上还没有可用的登录态。
  */
 app.get('/api/setup/state', ah(async (req, res) => {
-  const [items, changes, members] = await Promise.all([
+  const [items, changes, members, config] = await Promise.all([
     prisma.item.count(),
     prisma.changeLog.count(),
     prisma.member.count(),
+    prisma.appConfig.findUnique({ where: { id: 1 } }),
   ]);
   const skipped = nodeState.get('setupSkipped', '') === '1';
   const fresh = items === 0 && changes === 0 && members <= 1;
+  /**
+   * 【安全】只有"还没改过初始密码"的节点才允许从登录页退回引导。
+   * 一旦用户改过账号密码（isFirstLogin=false），说明这台机器已经初始化完成，
+   * 任何人都不该能从登录页把它重新变成"待入网"状态——否则拿到 URL 的人
+   * 就能用别人的配对串/账号把节点覆盖掉。
+   * 改过密码后想加入网络，必须登录后在「设置 → 共享网络」里操作。
+   */
+  const neverInitialized = !!config?.isFirstLogin;
+  const canReenter = fresh && skipped && neverInitialized;
   res.json({
     fresh,
     skipped,
     showWizard: fresh && !skipped,
+    canReenter,
+    initialized: !neverInitialized,
     items, changes, members,
     vaultMode: vault.mode(),
-    // 摄像头扫码需要 HTTPS 或 localhost，前端据此决定是否高亮"扫码"
   });
 }));
 
@@ -1460,8 +1586,20 @@ app.post('/api/setup/skip', ah(async (req, res) => {
  * 场景：用户点了"单独使用"进了登录页，又反悔想加入网络。
  */
 app.post('/api/setup/reset-skip', ah(async (req, res) => {
-  const items = await prisma.item.count();
-  if (items > 0) return res.status(400).json({ error: '本节点已有数据，请改用「设置 → 共享网络 → 加入别的网络」' });
+  const [items, config] = await Promise.all([
+    prisma.item.count(),
+    prisma.appConfig.findUnique({ where: { id: 1 } }),
+  ]);
+  if (items > 0) {
+    return res.status(400).json({ error: '本节点已有数据，请改用「设置 → 共享网络 → 加入别的网络」' });
+  }
+  // 【安全】改过密码就不允许免登录回退，必须先在设置里确认
+  if (!config || config.isFirstLogin === false) {
+    return res.status(403).json({
+      error: '这台设备已初始化完成，请登录后在「设置 → 共享网络 → 加入别的网络」操作',
+      code: 'ALREADY_INITIALIZED',
+    });
+  }
   await nodeState.set('setupSkipped', '');
   res.json({ success: true, showWizard: true });
 }));
