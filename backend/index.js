@@ -181,6 +181,14 @@ async function initSystem() {
   // 【E-09】检查私钥文件权限（Linux/macOS 上过宽会自动修正为 600）
   try { nodeIdentity.checkKeyPermissions && nodeIdentity.checkKeyPermissions(); } catch { /* 忽略 */ }
 
+  // 【v3.14.0】加载网络域名配置（DB 优先，env 兜底）
+  try {
+    const nc = await prisma.$queryRawUnsafe('SELECT cookieDomain, webauthnRpId FROM AppConfig WHERE id = 1');
+    const row = nc && nc[0];
+    if (row?.cookieDomain) COOKIE_DOMAIN = row.cookieDomain;
+    if (row?.webauthnRpId) WEBAUTHN_RP_ID_RUNTIME = row.webauthnRpId;
+  } catch { /* 列不存在时忽略 */ }
+
   syncEngine.init(prisma, itemStore);
   // 【自检修复 BUG-D】收到别人改密码后，本机的旧 JWT 也应失效
   syncEngine.setOnConfigApplied(() => bumpTokenEpoch());
@@ -684,7 +692,18 @@ function checkPasswordStrength(pw) {
 }
 
 /** 统一写 auth Cookie：跨子域 + 跨端口共享，HttpOnly 防 XSS 偷 token */
-const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || '';
+/**
+ * 网络域名配置（v3.14.0）
+ * ------------------------------------------------------------------
+ * COOKIE_DOMAIN / WEBAUTHN_RP_ID 多节点必须一致，否则登录态和 Passkey 不能共享。
+ * 让用户每台手配太麻烦，改成"入网时自动下发"：
+ *   - 老节点在 /api/join/snapshot 里带上 networkConfig
+ *   - 新节点 /api/join/from 收到后写入 AppConfig（不进 env，避免要改文件）
+ *   - 启动时 DB 优先，env 兜底
+ *   - 已入网的节点之后不会被覆盖（防止一台被攻破就污染全网）
+ */
+let COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || '';
+let WEBAUTHN_RP_ID_RUNTIME = String(process.env.WEBAUTHN_RP_ID || '').trim();
 const COOKIE_SECURE = (process.env.COOKIE_SECURE || 'auto') !== '0';
 function authCookie(token, maxAge = 30 * 24 * 3600) {
   const parts = [
@@ -915,6 +934,17 @@ app.get('/api/nodes/stats', authenticateToken, ah(async (req, res) => {
   const others = await Promise.all(members.filter((m) => m.nodeId !== selfId).map(probe));
   res.json({ self: selfStats, nodes: others, ts: Date.now() });
 }));
+
+/** 当前网络域名配置（只读，给前端显示"是否已配好"） */
+app.get('/api/net-config', authenticateToken, (req, res) => {
+  res.json({
+    cookieDomain: COOKIE_DOMAIN || '',
+    webauthnRpId: WEBAUTHN_RP_ID_RUNTIME || '',
+    cookieSecure: COOKIE_SECURE,
+    // 从 env 来的还是入网继承的
+    source: (COOKIE_DOMAIN && process.env.COOKIE_DOMAIN) ? 'env' : (COOKIE_DOMAIN ? 'inherited' : 'unset'),
+  });
+});
 
 /** 节点列表与同步状态（需登录） */
 app.get('/api/sync/status', authenticateToken, ah(async (req, res) => {
@@ -1235,6 +1265,11 @@ app.get('/api/join/snapshot', joinLimiter, ah(async (req, res) => {
   res.json({
     app: 'onepanel',
     kind: 'join-snapshot',
+    // 【v3.14.0】网络域名配置：新节点入网自动继承，不用手配
+    networkConfig: {
+      cookieDomain: COOKIE_DOMAIN || '',
+      webauthnRpId: WEBAUTHN_RP_ID_RUNTIME || '',
+    },
     version: 1,
     nodeId: me.nodeId,
     account: { username: config.username, passwordHash: config.password, isFirstLogin: false },
@@ -1554,11 +1589,23 @@ app.post('/api/join/from', joinLimiter, ah(async (req, res) => {
   console.log(`🚪 已加入网络：成员 ${(snapshot.members || []).length} 个，卡片 ${(snapshot.items || []).length} 张`);
   res.json({
     success: true,
+
     joinedNode: snapshot.nodeId,
     items: (snapshot.items || []).length,
     members: (snapshot.members || []).length,
     selfNodeId: me.nodeId,
   });
+
+  // 继承对方的网络域名配置（入网时一次性写入，之后老节点改也不覆盖）
+  try {
+    const nc = snapshot.networkConfig || {};
+    if (nc.cookieDomain || nc.webauthnRpId) {
+      await prisma.$executeRawUnsafe('UPDATE AppConfig SET cookieDomain = ?, webauthnRpId = ? WHERE id = 1', nc.cookieDomain || null, nc.webauthnRpId || null);
+      if (nc.cookieDomain) COOKIE_DOMAIN = nc.cookieDomain;
+      if (nc.webauthnRpId) WEBAUTHN_RP_ID_RUNTIME = nc.webauthnRpId;
+      console.log('[join] 已继承网络域名配置 cookieDomain=' + (nc.cookieDomain || '-') + ' rpId=' + (nc.webauthnRpId || '-'));
+    }
+  } catch (e) { console.warn('[join/from] 写入域名配置失败:', e.message); }
 }));
 
 // ====== ☁️ 内容寻址增量备份（v3.0.0 阶段 6）======
@@ -1795,14 +1842,15 @@ function rpIdFor(req) {
   try {
     const host = new URL(String(req.headers.origin || req.protocol + '://' + req.get('host'))).hostname;
     if (host === 'localhost' || host === '127.0.0.1') return host;
-    // 显式配置优先
-    if (RP_ID_ENV) return RP_ID_ENV;
+    // 显式配置优先（运行时值来自 DB 或 env）
+    const explicit = WEBAUTHN_RP_ID_RUNTIME || RP_ID_ENV;
+    if (explicit) return explicit;
     // 未配置：取 hostname 的父域（cn.xtay.cn -> xtay.cn）；
     // 两级域名（xtay.cn）直接用自身；纯 IP 只能用它自己（WebAuthn 下一般不可用）
     const parts = host.split('.');
     if (parts.length <= 2) return host;
     return parts.slice(-2).join('.');
-  } catch { return RP_ID_ENV || 'localhost'; }
+  } catch { return WEBAUTHN_RP_ID_RUNTIME || RP_ID_ENV || 'localhost'; }
 }
 
 /** 判断请求来源是否被允许（只比 host，忽略协议与端口） */

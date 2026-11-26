@@ -51,6 +51,9 @@ async function ensureColumns(prisma) {
     "ALTER TABLE AppConfig ADD COLUMN uiPrefs TEXT DEFAULT '{}'",
     // v3.10.6：JWT 纪元（持久化，重启后旧 token 仍失效）
     'ALTER TABLE AppConfig ADD COLUMN tokenEpoch INTEGER DEFAULT 0',
+    // v3.14.0：网络域名配置（入网时由老节点下发）
+    'ALTER TABLE AppConfig ADD COLUMN cookieDomain TEXT',
+    'ALTER TABLE AppConfig ADD COLUMN webauthnRpId TEXT',
   ];
   let done = 0;
   for (const sql of adds) {

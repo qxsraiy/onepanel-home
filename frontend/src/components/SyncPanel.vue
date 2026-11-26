@@ -31,6 +31,11 @@ const showMembers = ref(false)
 const joinRequests = ref([])
 let joinReqTimer = null
 // 【全网节点状态】鼠标悬停节点时显示该节点的 CPU/内存/磁盘
+// 网络域名配置（入网时自动继承）
+const netConfig = ref(null)
+async function loadNetConfig() {
+  try { const { data } = await axios.get('/api/net-config'); netConfig.value = data } catch { netConfig.value = null }
+}
 const nodeStats = ref({ self: null, nodes: [], ts: 0 })
 const hoverNodeId = ref('')
 let nodeStatsTimer = null
@@ -100,6 +105,7 @@ onMounted(() => {
   loadJoinRequests()
   joinReqTimer = setInterval(loadJoinRequests, 5000)
   loadNodeStats()
+  loadNetConfig()
   nodeStatsTimer = setInterval(loadNodeStats, 15000)
 })
 onUnmounted(() => {
@@ -322,6 +328,20 @@ onMounted(load);
       </div>
     </div>
 
+    <!-- ===== 网络域名配置 ===== -->
+    <div v-if="netConfig" class="setting-block" :class="{ 'cfg-warn': !netConfig.cookieDomain }">
+      <h4><AppIcon icon="mdi:earth" /> 网络域名配置</h4>
+      <template v-if="netConfig.cookieDomain">
+        <div class="cfg-row"><span>Cookie 域</span><b>{{ netConfig.cookieDomain }}</b></div>
+        <div class="cfg-row"><span>Passkey RP ID</span><b>{{ netConfig.webauthnRpId || '—' }}</b></div>
+        <div class="cfg-row"><span>来源</span><b>{{ netConfig.source === 'inherited' ? '入网时自动继承' : (netConfig.source === 'env' ? '环境变量' : '未设置') }}</b></div>
+        <p class="tip">加新节点不用改这里——新节点入网时会自动继承，老节点不受影响。</p>
+      </template>
+      <template v-else>
+        <p class="tip warn-text">⚠️ 还没配置。如果你有多个节点要用同一个登录态和 Passkey，需要在 <code>onepanel.env</code> 里设 <code>COOKIE_DOMAIN=.你的父域</code> 和 <code>WEBAUTHN_RP_ID=你的父域</code>，然后重启。</p>
+      </template>
+    </div>
+
     <!-- ===== 网络拓扑 ===== -->
     <div class="setting-block">
       <h4><AppIcon icon="mdi:lan-connect" /> 网络拓扑</h4>
@@ -474,6 +494,12 @@ onMounted(load);
 .nt-row { display: flex; gap: 10px; }
 .nt-row span { width: 62px; opacity: .5; flex-shrink: 0; }
 .nt-row b { font-weight: 500; }
+.cfg-row { display: flex; gap: 12px; font-size: 12.5px; padding: 6px 10px; border-radius: 8px;
+  background: color-mix(in srgb, var(--theme-color) 4%, transparent); margin-bottom: 6px; }
+.cfg-row span { width: 100px; opacity: .55; flex-shrink: 0; }
+.cfg-row b { font-weight: 500; font-family: ui-monospace, monospace; font-size: 12px; }
+.cfg-warn { border-color: color-mix(in srgb, #f59e0b 35%, transparent) !important; }
+.warn-text { color: #fbbf24; }
 .pending-block {
   border-color: color-mix(in srgb, #f59e0b 40%, transparent) !important;
   background: color-mix(in srgb, #f59e0b 6%, transparent);
