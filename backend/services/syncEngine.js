@@ -26,7 +26,8 @@ const peerState = new Map(); // nodeId -> { failures, nextAt, lastError }
 
 const PEER_INTERVAL_MS = Number(process.env.SYNC_INTERVAL_MS || 15000);
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
-const TIMEOUT_MS = Number(process.env.SYNC_TIMEOUT_MS || 8000);
+// 【v3.29.0】8 秒太短：CF 代理的节点经常 10~15 秒才响应，会误判离线。提到 20 秒。
+const TIMEOUT_MS = Number(process.env.SYNC_TIMEOUT_MS || 20000);
 
 /** 【P1-11】宿主回调：远端卡片变更应用后重建明文快照 */
 function setOnItemsApplied(fn) {

@@ -1120,7 +1120,8 @@ app.get('/api/sync/status', authenticateToken, ah(async (req, res) => {
       // 这里结合同步引擎的内存失败计数推导"有效状态"，拓扑图/列表的离线灯才会亮。
       const ps = (syncEngine.getPeerState() || {})[m.nodeId] || {};
       const failures = Number(ps.failures || 0);
-      const effective = m.status === 'revoked' ? 'revoked' : (failures >= 2 ? 'offline' : 'active');
+      // 【v3.29.0】失败 2 次就判离线太敏感（一次网络抖动就闪红），改成 3 次
+      const effective = m.status === 'revoked' ? 'revoked' : (failures >= 3 ? 'offline' : 'active');
       return {
         nodeId: m.nodeId, name: names[m.nodeId] || '', selfUrls: m.selfUrls, role: m.role,
         status: effective, dbStatus: m.status, failures,
@@ -1238,13 +1239,23 @@ app.post('/api/pair/new', authenticateToken, ah(async (req, res) => {
 
 const joinTokens = new Map();
 const JOIN_TTL_MS = 5 * 60 * 1000;
+/**
+ * 入网尝试限流（v3.29.0 大幅放宽）
+ * ------------------------------------------------------------------
+ * 之前 15 分钟 5 次，调试时反复试两下就打满，体验极差。
+ * 现在：
+ *   ① 只统计【失败】的请求（skipSuccessfulRequests）—— 成功的不计数
+ *   ② 上限提到 100 次（可用 JOIN_RATE_LIMIT 环境变量覆盖）
+ *   ③ 保留限流初衷：防暴力猜密码（100 次失败足够触发警报）
+ */
 const joinLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 5,
+  limit: Number(process.env.JOIN_RATE_LIMIT || 100),
+  skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
   validate: { trustProxy: false, xForwardedForHeader: false },
-  message: { error: '加入尝试过于频繁，请 15 分钟后再试' },
+  message: { error: '加入尝试过于频繁（连续失败 100 次），请 15 分钟后再试' },
 });
 
 /**
