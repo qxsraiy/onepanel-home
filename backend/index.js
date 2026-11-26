@@ -711,7 +711,19 @@ function checkPasswordStrength(pw) {
 let COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || '';
 let WEBAUTHN_RP_ID_RUNTIME = String(process.env.WEBAUTHN_RP_ID || '').trim();
 let COOKIE_SECURE = (process.env.COOKIE_SECURE || 'auto') !== '0';
-function authCookie(token, maxAge = 30 * 24 * 3600) {
+/**
+ * 统一写 auth Cookie。
+ * 【v3.19.1 关键修复】必须根据实际请求动态决定 Domain / Secure，
+ * 否则会出现"刚登录就提示失效"：
+ *   ① 配了 COOKIE_DOMAIN=.xtay.cn，却用 http://IP:5266 访问
+ *      → 浏览器发现 Domain 与当前 host 不匹配，**直接丢弃 Cookie**
+ *   ② 配了 COOKIE_SECURE=1，却用 http:// 访问
+ *      → 带 Secure 的 Cookie 在 http 下同样被丢弃
+ * 现在的策略：不匹配就不加那个属性（退化成 host-only / 非 Secure），
+ * 至少让当前访问方式能登录；同时在日志里警告一次。
+ */
+let cookieWarned = false;
+function authCookie(token, maxAge = 30 * 24 * 3600, req = null) {
   const parts = [
     'auth_token=' + encodeURIComponent(token),
     'Path=/',
@@ -719,11 +731,39 @@ function authCookie(token, maxAge = 30 * 24 * 3600) {
     'SameSite=Lax',
     'Max-Age=' + maxAge,
   ];
-  if (COOKIE_DOMAIN) parts.push('Domain=' + COOKIE_DOMAIN);
-  if (COOKIE_SECURE) parts.push('Secure');
+
+  let host = '';
+  let isHttps = false;
+  if (req) {
+    host = String((req.headers['x-forwarded-host'] || req.headers.host || '')).split(',')[0].trim().toLowerCase().replace(/:\d+$/, '');
+    isHttps = req.secure || String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+  }
+
+  // Domain：只在 host 属于该域时才加
+  if (COOKIE_DOMAIN) {
+    const cd = COOKIE_DOMAIN.replace(/^\./, '').toLowerCase();
+    const match = !host || host === cd || host.endsWith('.' + cd);
+    if (match) {
+      parts.push('Domain=' + COOKIE_DOMAIN);
+    } else if (!cookieWarned) {
+      cookieWarned = true;
+      console.warn('[cookie] COOKIE_DOMAIN=' + COOKIE_DOMAIN + ' 与当前访问地址 ' + host + ' 不匹配，本次不加 Domain（否则浏览器会丢弃 Cookie）。请确认你用的是该域下的地址访问。');
+    }
+  }
+
+  // Secure：只在 https 时加
+  if (COOKIE_SECURE) {
+    if (isHttps || !req) {
+      parts.push('Secure');
+    } else if (!cookieWarned) {
+      cookieWarned = true;
+      console.warn('[cookie] COOKIE_SECURE 已开启，但当前请求不是 https（host=' + host + '），本次不加 Secure（否则浏览器会丢弃 Cookie）。请用 https 访问，或临时设 COOKIE_SECURE=0。');
+    }
+  }
+
   return parts.join('; ');
 }
-const clearAuthCookie = () => authCookie('', 0);
+const clearAuthCookie = (req = null) => authCookie('', 0, req);
 
 // ====== 🛡️ 鉴权中间件 ======
 const authenticateToken = (req, res, next) => {
@@ -1971,7 +2011,7 @@ app.post('/api/auth/transfer/accept', ah(async (req, res) => {
   const config = await prisma.appConfig.findUnique({ where: { id: 1 } });
   const username = payload.username || config?.username || 'admin';
   const authToken = jwt.sign({ username, epoch: tokenEpoch }, JWT_SECRET, { expiresIn: '30d' });
-  res.setHeader('Set-Cookie', authCookie(authToken));
+  res.setHeader('Set-Cookie', authCookie(authToken, undefined, req));
 }));
 
 /** 退出：清掉 auth Cookie */
@@ -2214,7 +2254,7 @@ app.post('/api/passkey/login/verify', loginLimiter, ah(async (req, res) => {
     const config = await prisma.appConfig.findUnique({ where: { id: 1 } });
     const username = config?.username || 'admin';
     const authToken = jwt.sign({ username, epoch: tokenEpoch }, JWT_SECRET, { expiresIn: '30d' });
-    res.setHeader('Set-Cookie', authCookie(authToken));
+    res.setHeader('Set-Cookie', authCookie(authToken, undefined, req));
     // 【PRF】如果这条凭据有 PRF 包裹、前端也给了 prfOutput，就顺手解锁保险库
     let vaultUnlocked = false;
     if (prfOutput && row.prfWrapped) {
@@ -2638,7 +2678,7 @@ app.post('/api/login', loginLimiter, ah(async (req, res) => {
   if (config.isFirstLogin) {
     const tempToken = jwt.sign({ id: 1, requireChange: true }, JWT_SECRET, { expiresIn: '1h' });
     return res.json({ success: true, isFirstLogin: true, token: tempToken, message: '请修改默认账号密码' });
-  res.setHeader('Set-Cookie', authCookie(tempToken, 3600));
+  res.setHeader('Set-Cookie', authCookie(tempToken, 3600, req));
   }
 
   // 2. 2FA
@@ -2659,7 +2699,7 @@ app.post('/api/login', loginLimiter, ah(async (req, res) => {
   }
 
   const token = jwt.sign({ id: 1, username: config.username, epoch: tokenEpoch }, JWT_SECRET, { expiresIn: '30d' });
-  res.setHeader('Set-Cookie', authCookie(token));
+  res.setHeader('Set-Cookie', authCookie(token, undefined, req));
   res.json({ success: true, isFirstLogin: false, status: 'SUCCESS', token, vaultLocked: vault.isLocked() });
 }));
 
@@ -2693,7 +2733,7 @@ app.post('/api/login/verify-2fa', twoFaLimiter, ah(async (req, res) => {
     try { await itemStore.migrateLegacy(); } catch (e) { console.warn('⚠️ 整行加密迁移失败:', e.message); }
   }
   const finalToken = jwt.sign({ id: 1, username: config.username, epoch: tokenEpoch }, JWT_SECRET, { expiresIn: '30d' });
-  res.setHeader('Set-Cookie', authCookie(authToken));
+  res.setHeader('Set-Cookie', authCookie(authToken, undefined, req));
   res.json({ success: true, token: finalToken, vaultLocked: vault.isLocked() });
 }));
 
