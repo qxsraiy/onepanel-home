@@ -275,6 +275,22 @@ do_rollback() {
 
 do_auto_update() {
   need_installed || return 1
+  local cmd="bash ${INSTALL_DIR}/current/upgrade.sh --auto >> ${INSTALL_DIR}/upgrade.log 2>&1"
+
+  # 宝塔：不碰系统 crontab，只给指引
+  if [ -d /www/server/panel ]; then
+    echo ""
+    echo "  【宝塔面板】请在宝塔里添加，别用系统 crontab（会被覆盖）"
+    echo ""
+    echo "   宝塔 → 计划任务 → 添加任务"
+    echo "     任务类型：Shell 脚本"
+    echo "     任务名称：OnePanel 自动更新"
+    echo "     执行周期：每天 4 点（或你想要的时间）"
+    echo "     脚本内容：$cmd"
+    echo ""
+    return 0
+  fi
+
   if crontab -l 2>/dev/null | grep -q "onepanel/current/upgrade.sh"; then
     printf "  当前已开启自动更新，关闭？[y/N] "
     read -r off
@@ -288,7 +304,7 @@ do_auto_update() {
     hour="${hour:-4}"
     (crontab -l 2>/dev/null | grep -v "onepanel/current/upgrade.sh"; \
      echo "0 ${hour} * * * bash ${INSTALL_DIR}/current/upgrade.sh --auto >> ${INSTALL_DIR}/upgrade.log 2>&1") | crontab -
-    echo "  ✅ 已开启：每天 ${hour}:00 自动检查更新"
+    echo "  ✅ 已开启：每天 ${hour}:00"
   fi
 }
 
@@ -521,11 +537,27 @@ else
 fi
 
 # ---------- 10. 自动更新计划任务 ----------
-if [[ "$AUTO_UPDATE" -eq 1 ]]; then
-  CRON_LINE="0 4 * * * bash ${INSTALL_DIR}/current/manage.sh upgrade --auto >> ${INSTALL_DIR}/upgrade.log 2>&1"
-  (crontab -l 2>/dev/null | grep -v 'onepanel/current/manage.sh upgrade' ; echo "$CRON_LINE") | crontab -
-  log "已添加自动更新计划任务（每天 04:00）"
-  log "宝塔面板用户：系统计划任务里也能看到这条，可自行改成想要的时间"
+if [ "$AUTO_UPDATE" -eq 1 ]; then
+  CRON_CMD="bash ${INSTALL_DIR}/current/upgrade.sh --auto >> ${INSTALL_DIR}/upgrade.log 2>&1"
+  if [ -d /www/server/panel ]; then
+    # 宝塔不读取系统 crontab，且会覆盖 /var/spool/cron，所以不能写 crontab
+    echo ""
+    echo "  ══════════════════════════════════════════════════════"
+    echo "  检测到【宝塔面板】—— 自动更新需要你在宝塔里手动添加"
+    echo "  ══════════════════════════════════════════════════════"
+    echo ""
+    echo "   宝塔 → 计划任务 → 添加任务"
+    echo "     任务类型：Shell 脚本"
+    echo "     任务名称：OnePanel 自动更新"
+    echo "     执行周期：每天 ${AUTO_UPDATE_HOUR:-4} 点"
+    echo "     脚本内容：$CRON_CMD"
+    echo ""
+    echo "   （宝塔有独立任务库，系统 crontab 里写的它不显示，还会被覆盖）"
+    echo ""
+  else
+    (crontab -l 2>/dev/null | grep -v "onepanel/current/upgrade.sh"; echo "0 ${AUTO_UPDATE_HOUR:-4} * * * $CRON_CMD") | crontab -
+    log "已添加自动更新计划任务（每天 ${AUTO_UPDATE_HOUR:-4}:00）"
+  fi
 fi
 
 # ---------- 11. 健康检查 ----------
