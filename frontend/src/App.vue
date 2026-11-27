@@ -532,32 +532,21 @@ const onDragOverItem = (e, item) => {
   dragOverItem.value = item.id
 }
 
-const onDrop = async (e, groupName) => {
-  e.preventDefault()
-  const dragged = draggedItem.value
-  const targetId = dragOverItem.value
-  draggedItem.value = null
-  dragOverItem.value = null
-  if (!dragged || !isSortMode.value) return
-
+/** 插入式排序的核心：把 dragged 插到 targetId 的位置，目标及其后的全部后延一位 */
+const commitInsert = async (dragged, targetId, groupName) => {
+  if (!dragged) return
   const list = [...(groupedItems.value[groupName] || [])]
   const fromIdx = list.findIndex((i) => i.id === dragged.id)
   if (fromIdx < 0) return
-
-  // 没有明确落点（拖到空白区）→ 放到这一组末尾
   let toIdx = list.length
   if (targetId) {
     const ti = list.findIndex((i) => i.id === targetId)
     if (ti >= 0) toIdx = ti
   }
   if (toIdx === fromIdx) return
-
-  // 插入式：把人拎出来，插到目标位置；目标及其后的自然后移一位
   const [moved] = list.splice(fromIdx, 1)
   const insertAt = toIdx > fromIdx ? toIdx - 1 : toIdx
   list.splice(insertAt, 0, moved)
-
-  // 本机先更新（界面立刻响应），再落库
   const prevMap = groupedItems.value[groupName]
   groupedItems.value[groupName] = list
   try {
@@ -570,20 +559,14 @@ const onDrop = async (e, groupName) => {
   }
 }
 
-/** 移动端排序：方向按钮（插到前一张/后一张的位置） */
-const nudgeItem = async (item, dx) => {
-  const list = [...(groupedItems.value[item.group] || [])]
-  const from = list.findIndex((i) => i.id === item.id)
-  const to = from + dx
-  if (from < 0 || to < 0 || to >= list.length) return
-  const [moved] = list.splice(from, 1)
-  list.splice(to, 0, moved)
-  groupedItems.value[item.group] = list
-  try {
-    await axios.put('/api/items/reorder', { orderedIds: list.map((i) => i.id) })
-  } catch {
-    fetchItems()
-  }
+const onDrop = async (e, groupName) => {
+  e.preventDefault()
+  const dragged = draggedItem.value
+  const targetId = dragOverItem.value
+  draggedItem.value = null
+  dragOverItem.value = null
+  if (!dragged || !isSortMode.value) return
+  await commitInsert(dragged, targetId, groupName)
 }
 
 
@@ -1731,6 +1714,7 @@ onUnmounted(() => {
                 :has-memo="hasMemo(item)"
                 :style="getCombinedStyle(item)"
                 :draggable="isSortMode && !isMobile"
+                :data-item-id="item.id"
                 @dragstart="onDragStart($event, item)"
                 @dragover="onDragOverItem($event, item)"
                 @click="onCardClick(item)"
@@ -1747,7 +1731,9 @@ onUnmounted(() => {
                 :class="{ 'is-drop-target': dragOverItem === item.id, 'is-hidden-card': item.isHidden, 'is-context-open': contextMenu.visible && contextMenu.item?.id === item.id }"
                 :style="getCombinedStyle(item)"
                 :draggable="isSortMode && !isMobile"
+                :data-item-id="item.id"
                 @dragstart="onDragStart($event, item)"
+                @dragover="onDragOverItem($event, item)"
                 @click="onCardClick(item)"
                 @contextmenu.prevent="showMenu($event, item)"
                 @touchstart.passive="onTouchStart($event, item)"
@@ -1772,11 +1758,6 @@ onUnmounted(() => {
                   <span v-if="hasMemo(item)" class="flag-memo" title="有备忘录"><AppIcon icon="mdi:note-text-outline" /></span>
                 </div>
 
-                <!-- 排序模式下的移动端移动按钮 -->
-                <div class="mobile-nudge">
-                  <button @click="nudgeItem(item, -1)" title="上移"><AppIcon icon="mdi:arrow-up" /></button>
-                  <button @click="nudgeItem(item, 1)" title="下移"><AppIcon icon="mdi:arrow-down" /></button>
-                </div>
               </div>
             </template>
           </div>
