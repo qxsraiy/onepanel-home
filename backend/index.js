@@ -582,7 +582,11 @@ async function recordChangeForItem(uid, op) {
     const nodeId = nodeIdentity.self().nodeId;
     const seq = await nodeState.nextSeq();
     const changeId = nodeId + ':' + seq;
-    const payloadDigest = crypto.createHash('sha256').update(String(row.payload || '')).digest('hex');
+    // 【v3.34.0 关键修复】delete 时 payload 字段存的是 null，
+    // 但签名原来用真实 row.payload 的 hash —— 接收端算 sha256(String(null||'')) = sha256('')，
+    // 两边对不上 → 验签必然失败 → 卡片删除永远同步不过去。
+    const storedPayload = op === 'delete' ? null : row.payload;
+    const payloadDigest = crypto.createHash('sha256').update(String(storedPayload || '')).digest('hex');
     const signBase = [changeId, 'item', uid, op, row.hlc, payloadDigest].join('|');
     const sig = nodeIdentity.sign(signBase);
     await prisma.changeLog.create({
