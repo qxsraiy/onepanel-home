@@ -3320,7 +3320,7 @@ app.post('/api/items', authenticateToken, ah(async (req, res) => {
  */
 app.put('/api/items/reorder', authenticateToken, ah(async (req, res) => {
   if (vault.isLocked()) return res.status(423).json({ error: '保险库未解锁：此时批量重排会误改全部卡片' });
-  const { orderedIds } = req.body || {};
+  const { orderedIds, group } = req.body || {};
   if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
     return res.status(400).json({ error: 'orderedIds 必须是非空数组' });
   }
@@ -3334,7 +3334,7 @@ app.put('/api/items/reorder', authenticateToken, ah(async (req, res) => {
       if (Number(row.order ?? 0) === i && !row.__wasReordered) {
         // 位置没变也写一次：首次从 gridX/gridY 迁到 order 时需要落盘
       }
-      await itemStore.patch(id, { order: i });
+      await itemStore.patch(id, group ? { order: i, group: String(group) } : { order: i });
       await recordChangeForItem(row.uid, 'upsert');
       changed += 1;
     } catch (e) {

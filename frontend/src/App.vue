@@ -533,28 +533,57 @@ const onDragOverItem = (e, item) => {
 }
 
 /** 插入式排序的核心：把 dragged 插到 targetId 的位置，目标及其后的全部后延一位 */
+/**
+ * 插入式排序（支持跨组）：
+ *   同组内拖动 → 插到目标位置，目标及其后全部后延一格
+ *   跨组拖动   → 卡片 group 改成目标组，并插到目标位置
+ */
 const commitInsert = async (dragged, targetId, groupName) => {
   if (!dragged) return
-  const list = [...(groupedItems.value[groupName] || [])]
-  const fromIdx = list.findIndex((i) => i.id === dragged.id)
-  if (fromIdx < 0) return
-  let toIdx = list.length
+  const fromGroup = dragged.group
+  const isCrossGroup = fromGroup !== groupName
+
+  // 目标组当前顺序（跨组时不含被拖的卡）
+  const targetList = [...(groupedItems.value[groupName] || [])].filter((i) => i.id !== dragged.id)
+  let insertAt = targetList.length
   if (targetId) {
-    const ti = list.findIndex((i) => i.id === targetId)
-    if (ti >= 0) toIdx = ti
+    const ti = targetList.findIndex((i) => i.id === targetId)
+    if (ti >= 0) insertAt = ti
   }
-  if (toIdx === fromIdx) return
-  const [moved] = list.splice(fromIdx, 1)
-  const insertAt = toIdx > fromIdx ? toIdx - 1 : toIdx
-  list.splice(insertAt, 0, moved)
-  const prevMap = groupedItems.value[groupName]
-  groupedItems.value[groupName] = list
+
+  if (!isCrossGroup) {
+    const fromIdx = targetList.findIndex((i) => i.id === dragged.id)
+    // 同组：用原索引判断有没有实际移动
+    const oldIdx = (groupedItems.value[groupName] || []).findIndex((i) => i.id === dragged.id)
+    if (oldIdx >= 0 && targetId) {
+      const ti = (groupedItems.value[groupName] || []).findIndex((i) => i.id === targetId)
+      if (ti >= 0 && ti === oldIdx) return
+    }
+  }
+
+  // 组装新顺序
+  targetList.splice(insertAt, 0, { ...dragged, group: groupName })
+
+  const prevMap = JSON.parse(JSON.stringify(groupedItems.value))
+  // 跨组：先从原组移除
+  if (isCrossGroup && groupedItems.value[fromGroup]) {
+    groupedItems.value[fromGroup] = groupedItems.value[fromGroup].filter((i) => i.id !== dragged.id)
+    dragged.group = groupName
+  }
+  groupedItems.value[groupName] = targetList
+
   try {
-    await axios.put('/api/items/reorder', { orderedIds: list.map((i) => i.id) })
-    toast('已调整为第 ' + (insertAt + 1) + ' 位', 'success', 1800)
+    await axios.put('/api/items/reorder', {
+      orderedIds: targetList.map((i) => i.id),
+      group: groupName,
+    })
+    toast(
+      (isCrossGroup ? '已移到「' + groupName + '」第 ' : '已调整为第 ') + (insertAt + 1) + ' 位',
+      'success', 1800
+    )
   } catch (err) {
     toast('顺序保存失败', 'error')
-    groupedItems.value[groupName] = prevMap
+    groupedItems.value = prevMap
     fetchItems()
   }
 }
@@ -2481,6 +2510,15 @@ onUnmounted(() => {
 }
 .menu-hint { margin-left: auto; font-size: 10px; opacity: .45; }
 .card-flags span.flag-memo { color: #fbbf24; }
+/* 备忘录弹窗的按钮行：普通流式布局，不要固定的底色条 */
+.memo-modal .modal-actions {
+  position: static;
+  margin-top: 15px;
+  padding: 0;
+  background: transparent;
+  border-top: none;
+}
+
 .memo-modal {
   width: min(560px, calc(100vw - 24px));
   /* 【修复】之前继承了 modal-content 的 padding:0，内容直接贴边框 */
@@ -2835,7 +2873,9 @@ input:checked + .slider-round:before { transform: translateX(18px); }
 .mp-badge { position: absolute; top: 16px; right: 20px; font-size: 10px; padding: 2px 8px; border-radius: 999px;
   background: color-mix(in srgb, var(--theme-accent, #3b82f6) 20%, transparent); color: var(--theme-accent, #3b82f6); }
 .modal-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px 20px 8px; }
-.modal-content .modal-actions {
+/* 【v3.36.0】这条样式只给编辑弹窗（底部固定工具栏），之前写成全局的，
+   导致备忘录弹窗底部多出一条带底色的横条（看起来像大白块） */
+.modal-content.editor-modal .modal-actions {
   position: static; flex-shrink: 0; margin: 0; padding: 14px 20px;
   background: color-mix(in srgb, var(--theme-bg, #0f172a) 96%, transparent);
   border-top: 1px solid color-mix(in srgb, var(--theme-color) 9%, transparent);
