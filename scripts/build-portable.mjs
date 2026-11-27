@@ -68,7 +68,16 @@ try {
   const tableCount = (ddl.match(/CREATE TABLE/gi) || []).length;
   log(`建表 SQL -> bin/schema.sql（${tableCount} 张表）`);
 } catch (e) {
-  console.error('  [!!] 导出 schema.sql 失败（需要本机有 sqlite3）:', e.message);
+  // 【v3.31.0】CI 的 Windows runner 没有 sqlite3 —— 直接拿仓库里的 bin/schema.sql 兜底
+  console.error('  [!!] 导出 schema.sql 失败:', e.message);
+  const fallback = path.join(BACKEND, 'bin', 'schema.sql');
+  if (fs.existsSync(fallback)) {
+    fs.cpSync(fallback, path.join(OUT, 'bin', 'schema.sql'));
+    const n = (fs.readFileSync(fallback, 'utf8').match(/CREATE TABLE/gi) || []).length;
+    log(`建表 SQL -> bin/schema.sql（兜底，${n} 张表）`);
+  } else {
+    fail('既导不出 schema.sql，也没有 backend/bin/schema.sql 兜底');
+  }
 }
 
 
