@@ -1184,6 +1184,21 @@ app.post('/api/sync/peers', authenticateToken, ah(async (req, res) => {
  * 【Q2 方案 A】踢出某个节点：本地立即拉黑，再写一条 admin/revoke 变更，全网跟随。
  * 任何一台都能发起（每台都是管理员），但不能踢自己。
  */
+/** 彻底删除一个已踢出/离线的成员（仅本地清理，不影响对方） */
+app.delete('/api/sync/member/:nodeId', authenticateToken, ah(async (req, res) => {
+  const nodeId = String(req.params.nodeId || '').trim();
+  if (!nodeId) return res.status(400).json({ error: '缺少 nodeId' });
+  if (nodeId === nodeSelfId()) return res.status(400).json({ error: '不能删除自己' });
+  const row = await prisma.member.findUnique({ where: { nodeId } }).catch(() => null);
+  if (!row) return res.status(404).json({ error: '成员不存在' });
+  // 只允许删已踢出的，避免误删在线节点
+  if (String(row.status || '') !== 'revoked') {
+    return res.status(400).json({ error: '只能删除已踢出的设备，请先踢出' });
+  }
+  await prisma.member.delete({ where: { nodeId } }).catch(() => {});
+  res.json({ success: true });
+}));
+
 app.post('/api/sync/revoke', authenticateToken, ah(async (req, res) => {
   const target = String((req.body || {}).nodeId || '').trim();
   if (!target) return res.status(400).json({ error: '需要 nodeId' });

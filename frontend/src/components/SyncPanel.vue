@@ -274,6 +274,19 @@ async function revoke(member) {
     toast('再点一次确认踢出 ' + String(member.nodeId || '').slice(0, 6), 'warn', 4000)
     return
   }
+
+/** 彻底删除已踢出的成员（从本地 Member 表移除，不再显示） */
+async function removeMember(member) {
+  const label = member.name || shortId(member.nodeId);
+  if (!confirm(`确定要彻底删除「${label}」吗？\n\n这会把它从网络成员列表里移除，不影响它自己的数据。`)) return
+  try {
+    await axios.delete('/api/sync/member/' + encodeURIComponent(member.nodeId));
+    toast('已删除', 'success');
+    await load();
+  } catch (e) {
+    toast(e.response?.data?.error || '删除失败', 'error');
+  }
+}
   kickArmed = null
   busy.value = true;
   try {
@@ -523,7 +536,8 @@ onMounted(load);
             <div v-for="m in otherMembers" :key="'k' + m.nodeId" class="member-row">
               <code class="member-id" :title="m.nodeId">{{ m.name || shortId(m.nodeId) }}</code>
               <span class="member-url">{{ m.status }}</span>
-              <button class="btn-outline danger-mini" :disabled="busy || m.status === 'revoked'" @click="revoke(m)">踢出</button>
+              <button class="btn-outline danger-mini" :disabled="busy || m.status === 'revoked'" @click="revoke(m)">{{ m.status === 'revoked' ? '已踢出' : '踢出' }}</button>
+              <button v-if="m.status === 'revoked'" class="btn-outline danger-mini" :disabled="busy" @click="removeMember(m)">删除</button>
             </div>
           </div>
         </div>

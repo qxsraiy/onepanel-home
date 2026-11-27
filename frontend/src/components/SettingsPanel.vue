@@ -817,6 +817,12 @@ const handleCloseCheck = async () => {
 .glass-input:focus { border-color: #3b82f6; }
 
 
+/* 等长修复：flex:1 的子项默认 min-width:auto，label 文字长了会把框撑宽 */
+.flex-1 { min-width: 0; }
+.flex-2 { min-width: 0; }
+.form-row > .flex-1 > label,
+.form-row > .flex-2 > label { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .color-picker { -webkit-appearance: none; border: none; width: 100%; height: 40px; border-radius: 8px; cursor: pointer; background: none; }
 .color-picker::-webkit-color-swatch { border: 1px solid color-mix(in srgb, var(--theme-color) 20%, transparent); border-radius: 8px; }
 

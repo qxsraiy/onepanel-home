@@ -1628,7 +1628,7 @@ onUnmounted(() => {
           <input v-model="loginForm.password" type="password" placeholder="密码" class="glass-input full-w mt-3" @keyup.enter="handleLogin" />
           <button class="btn-primary full-w mt-4" style="padding: 12px" @click="handleLogin">登 录</button>
           <button
-            class="btn-outline full-w mt-2" style="padding: 11px"
+            class="btn-outline full-w" style="padding: 11px; margin-top: 12px"
             :disabled="passkeyBusy" @click="handlePasskeyLogin"
           >
             {{ passkeyBusy ? '验证中…' : '🔐 用通行密钥登录' }}
@@ -2231,7 +2231,7 @@ onUnmounted(() => {
                 <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">✅ 已应用本地图片</span>
                 <button style="background:none;border:none;color:#ef4444;cursor:pointer;" @click="clearIcon">清除</button>
               </div>
-              <button class="upload-btn" style="height:38px;border:none;" :disabled="fetchingIcon" @click="autoFetchIcon" title="根据第一个网址自动抓取站点图标">
+              <button class="upload-btn" style="height:38px;" :disabled="fetchingIcon" @click="autoFetchIcon" title="根据第一个网址自动抓取站点图标">
                 <AppIcon icon="mdi:magnify" />{{ fetchingIcon ? '抓取中…' : '自动获取' }}
               </button>
               <label class="upload-btn" style="height:38px;display:flex;align-items:center;cursor:pointer;">
