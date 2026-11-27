@@ -16,7 +16,7 @@ import {
   clampMenuPosition, sanitizeFooter, isMobileWidth, toast, copyToClipboard,
 } from './utils/common'
 import { applyThemeToBody } from './utils/theme'
-import { packLayout, arrangeLayout, resolveSlot, spanOf, SIZE_PRESETS } from './utils/grid'
+import { spanOf, SIZE_PRESETS } from './utils/grid'
 import { saveItems as saveOfflineItems, loadItems as loadOfflineItems } from './utils/offlineCache'
 
 // ============================================================
@@ -512,26 +512,6 @@ const observeGridResize = () => {
 // ---- 卡片实际矩形（span 由"是否锁定内嵌 / 是否小组件"决定）----
 const spanOfItem = (item) => spanOf(item)
 
-// ---- 渲染前统一拆冲突：同格的两张卡不会再叠在一起 ----
-const layoutPositions = computed(() => {
-  const cols = Math.max(1, gridCols.value)
-  const positions = new Map()
-  for (const list of Object.values(groupedItems.value)) {
-    const entries = list.map((item) => {
-      const span = spanOfItem(item)
-      return { id: item.id, x: item.gridX, y: item.gridY, w: span.w, h: span.h }
-    })
-    const placed = packLayout(entries, cols)
-    for (const [id, pos] of placed) positions.set(id, pos)
-  }
-  return positions
-})
-
-const rectFor = (item) => {
-  const span = spanOfItem(item)
-  const pos = layoutPositions.value.get(item.id)
-  return { x: pos?.x || 1, y: pos?.y || 1, w: span.w, h: span.h }
-}
 
 const onDragStart = (e, item) => {
   if (!isSortMode.value) { e.preventDefault(); return }
@@ -540,118 +520,72 @@ const onDragStart = (e, item) => {
   e.dataTransfer.setData('text/plain', String(item.id))
 }
 
+// 【v3.35.0】拖拽改成"插入式"：
+//   拖到某张卡上 → 被拖的卡插到它前面，原来的卡以及后面的全部顺延一格
+//   不再计算 x/y 坐标，只改数组顺序（order），任何屏宽都自动换行
+const dragOverItem = ref(null)
+
+const onDragOverItem = (e, item) => {
+  if (!isSortMode.value || !draggedItem.value) return
+  if (draggedItem.value.id === item.id) return
+  e.preventDefault()
+  dragOverItem.value = item.id
+}
+
 const onDrop = async (e, groupName) => {
-  if (!draggedItem.value || !isSortMode.value) return
-  const grid = e.currentTarget.querySelector('.icon-grid')
-  if (!grid) return
-  const rect = grid.getBoundingClientRect()
-
-  let dropX = e.clientX - rect.left
-  let dropY = e.clientY - rect.top
-  dropX = Math.max(0, dropX)
-  dropY = Math.max(0, dropY)
-
-  // 按容器实际列数夹取，避免拖到最右/最下边缘产生隐式列/行
-  const cols = Math.max(1, Math.floor((grid.clientWidth + 20) / GRID_COL))
-  const rows = Math.max(1, Math.floor((grid.clientHeight + 20) / GRID_ROW))
-  const spanW = spanOfItem(draggedItem.value).w
-
-  const gridX = Math.min(Math.max(1, Math.floor(dropX / GRID_COL) + 1), Math.max(1, cols - spanW + 1))
-  const gridY = Math.min(Math.max(1, Math.floor(dropY / GRID_ROW) + 1), rows)
-
-  await moveItemTo(draggedItem.value, gridX, gridY, groupName)
+  e.preventDefault()
+  const dragged = draggedItem.value
+  const targetId = dragOverItem.value
   draggedItem.value = null
-}
+  dragOverItem.value = null
+  if (!dragged || !isSortMode.value) return
 
-const moveItemTo = async (item, gridX, gridY, groupName) => {
-  // 落点被别人占了就自动避让到最近的空位，绝不把两张卡叠在一起
-  const others = (groupedItems.value[groupName] || []).filter((i) => i.id !== item.id).map((i) => rectFor(i))
-  const span = spanOfItem(item)
-  const slot = resolveSlot(others, { x: gridX, y: gridY, w: span.w, h: span.h }, gridCols.value)
-  if (item.gridX === slot.x && item.gridY === slot.y && item.group === groupName) return
-  item.gridX = slot.x
-  item.gridY = slot.y
-  item.group = groupName
+  const list = [...(groupedItems.value[groupName] || [])]
+  const fromIdx = list.findIndex((i) => i.id === dragged.id)
+  if (fromIdx < 0) return
+
+  // 没有明确落点（拖到空白区）→ 放到这一组末尾
+  let toIdx = list.length
+  if (targetId) {
+    const ti = list.findIndex((i) => i.id === targetId)
+    if (ti >= 0) toIdx = ti
+  }
+  if (toIdx === fromIdx) return
+
+  // 插入式：把人拎出来，插到目标位置；目标及其后的自然后移一位
+  const [moved] = list.splice(fromIdx, 1)
+  const insertAt = toIdx > fromIdx ? toIdx - 1 : toIdx
+  list.splice(insertAt, 0, moved)
+
+  // 本机先更新（界面立刻响应），再落库
+  const prevMap = groupedItems.value[groupName]
+  groupedItems.value[groupName] = list
   try {
-    await axios.put('/api/items/position', { id: item.id, gridX: slot.x, gridY: slot.y, group: groupName })
+    await axios.put('/api/items/reorder', { orderedIds: list.map((i) => i.id) })
+    toast('已调整为第 ' + (insertAt + 1) + ' 位', 'success', 1800)
   } catch (err) {
-    toast('位置保存失败', 'error')
-    fetchItems() // 失败回滚为服务端真实状态
+    toast('顺序保存失败', 'error')
+    groupedItems.value[groupName] = prevMap
+    fetchItems()
   }
 }
 
-/** 移动端排序：方向按钮移动卡片 */
-const nudgeItem = async (item, dx, dy) => {
-  const current = rectFor(item)
-  await moveItemTo(item, Math.max(1, current.x + dx), Math.max(1, current.y + dy), item.group)
-}
-
-/**
- * 一键整理布局：把每组卡片按顺序排成规整网格。
- * 注意：v3.7.2 起 UI 上不再提供这个按钮（排序模式只留"完成"），
- * 函数保留是因为它还被键盘快捷键/调试用到，删掉会牵连其他逻辑。
- */
-const autoLayout = async () => {
-  const cols = isMobile.value ? 1 : Math.max(1, gridCols.value)
-  const jobs = []
-  for (const [groupName, list] of Object.entries(groupedItems.value)) {
-    const entries = list.map((item) => {
-      const span = spanOfItem(item)
-      return { id: item.id, w: span.w, h: span.h }
-    })
-    const placed = arrangeLayout(entries, cols)
-    for (const item of list) {
-      const pos = placed.get(item.id)
-      if (!pos) continue
-      if (item.gridX !== pos.x || item.gridY !== pos.y) {
-        jobs.push(axios.put('/api/items/position', { id: item.id, gridX: pos.x, gridY: pos.y, group: groupName }).catch(() => {}))
-      }
-    }
-  }
-  if (jobs.length === 0) return toast('布局已经是整齐的', 'info')
-  await Promise.all(jobs)
-  await fetchItems()
-  toast(`已重新排列 ${jobs.length} 张卡片`, 'success')
-}
-
-// ---- 旧数据自愈：同一个格子里塞了多张卡时，把后来者写回一个空位 ----
-let layoutFixTimer = null
-const persistResolvedLayout = async () => {
-  if (!isLoggedIn.value || isSortMode.value) return
-  const jobs = []
-  for (const [groupName, list] of Object.entries(groupedItems.value)) {
-    const seen = new Set()
-    const duplicated = new Set()
-    for (const item of list) {
-      if (!item.gridX || !item.gridY) continue
-      const key = `${item.gridX}:${item.gridY}`
-      if (seen.has(key)) duplicated.add(key)
-      seen.add(key)
-    }
-    if (!duplicated.size) continue
-    for (const item of list) {
-      if (!duplicated.has(`${item.gridX}:${item.gridY}`)) continue
-      const pos = layoutPositions.value.get(item.id)
-      if (!pos || (pos.x === item.gridX && pos.y === item.gridY)) continue
-      jobs.push({ id: item.id, gridX: pos.x, gridY: pos.y, group: groupName })
-    }
-  }
-  if (!jobs.length) return
+/** 移动端排序：方向按钮（插到前一张/后一张的位置） */
+const nudgeItem = async (item, dx) => {
+  const list = [...(groupedItems.value[item.group] || [])]
+  const from = list.findIndex((i) => i.id === item.id)
+  const to = from + dx
+  if (from < 0 || to < 0 || to >= list.length) return
+  const [moved] = list.splice(from, 1)
+  list.splice(to, 0, moved)
+  groupedItems.value[item.group] = list
   try {
-    await Promise.all(jobs.map((job) => axios.put('/api/items/position', job)))
-    for (const job of jobs) {
-      const item = items.value.find((i) => i.id === job.id)
-      if (item) { item.gridX = job.gridX; item.gridY = job.gridY; item.group = job.group }
-    }
+    await axios.put('/api/items/reorder', { orderedIds: list.map((i) => i.id) })
   } catch {
-    /* 写回失败就只保证这一屏不重叠，下次加载再试 */
+    fetchItems()
   }
 }
-const scheduleLayoutFix = () => {
-  clearTimeout(layoutFixTimer)
-  layoutFixTimer = setTimeout(persistResolvedLayout, 600)
-}
-watch(items, () => { if (items.value.length) scheduleLayoutFix() })
+
 
 // ============================================================
 // 🔎 4.5 全局搜索（按 / 呼出，↑↓ 选择，回车打开）
@@ -1145,20 +1079,11 @@ const getCombinedStyle = (item) => {
   const span = spanOfItem(item)
   const spanW = span.w
   const spanH = span.h
-  // 坐标一律取"拆过冲突之后"的结果，同格重叠的旧数据也会被自动挪开
-  const pos = layoutPositions.value.get(item.id)
 
-  // 小屏不携带桌面网格坐标（否则内联 gridColumn 会制造隐式列，把卡片挤出屏幕）
-  if (isMobile.value) {
-    baseStyle.gridColumn = `span ${spanW}`
-    baseStyle.gridRow = `span ${spanH}`
-  } else if (pos) {
-    baseStyle.gridColumn = `${pos.x} / span ${spanW}`
-    baseStyle.gridRow = `${pos.y} / span ${spanH}`
-  } else {
-    baseStyle.gridColumn = `span ${spanW}`
-    baseStyle.gridRow = `span ${spanH}`
-  }
+  // 【v3.35.0】改成纯流式：只用 span，不写 gridColumn/gridRow 坐标。
+  // 拖拽只改数组顺序，任何屏幕宽度都会自动换行，不会再钉死在某个格子。
+  baseStyle.gridColumn = `span ${spanW}`
+  baseStyle.gridRow = `span ${spanH}`
 
   if (draggedItem.value?.id === item.id) {
     baseStyle.opacity = 0.5
@@ -1807,6 +1732,7 @@ onUnmounted(() => {
                 :style="getCombinedStyle(item)"
                 :draggable="isSortMode && !isMobile"
                 @dragstart="onDragStart($event, item)"
+                @dragover="onDragOverItem($event, item)"
                 @click="onCardClick(item)"
                 @contextmenu.prevent="showMenu($event, item)"
                 @touchstart.passive="onTouchStart($event, item)"
@@ -1818,7 +1744,7 @@ onUnmounted(() => {
               <div
                 v-else
                 class="app-card"
-                :class="{ 'is-hidden-card': item.isHidden, 'is-context-open': contextMenu.visible && contextMenu.item?.id === item.id, 'is-wide': (item.cardW || 1) === 2, 'is-tall': (item.cardH || 1) === 2, 'is-large': (item.cardW || 1) === 2 && (item.cardH || 1) === 2 }"
+                :class="{ 'is-drop-target': dragOverItem === item.id, 'is-hidden-card': item.isHidden, 'is-context-open': contextMenu.visible && contextMenu.item?.id === item.id }"
                 :style="getCombinedStyle(item)"
                 :draggable="isSortMode && !isMobile"
                 @dragstart="onDragStart($event, item)"
@@ -1847,11 +1773,9 @@ onUnmounted(() => {
                 </div>
 
                 <!-- 排序模式下的移动端移动按钮 -->
-                <div v-if="isSortMode && isMobile" class="sort-controls" @click.stop>
-                  <button @click="nudgeItem(item, 0, -1)" title="上移"><AppIcon icon="mdi:arrow-up" /></button>
-                  <button @click="nudgeItem(item, -1, 0)" title="左移"><AppIcon icon="mdi:arrow-left" /></button>
-                  <button @click="nudgeItem(item, 1, 0)" title="右移"><AppIcon icon="mdi:arrow-right" /></button>
-                  <button @click="nudgeItem(item, 0, 1)" title="下移"><AppIcon icon="mdi:arrow-down" /></button>
+                <div class="mobile-nudge">
+                  <button @click="nudgeItem(item, -1)" title="上移"><AppIcon icon="mdi:arrow-up" /></button>
+                  <button @click="nudgeItem(item, 1)" title="下移"><AppIcon icon="mdi:arrow-down" /></button>
                 </div>
               </div>
             </template>
@@ -2348,6 +2272,11 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.is-drop-target {
+  outline: 2px dashed color-mix(in srgb, var(--theme-accent, #3b82f6) 70%, transparent) !important;
+  outline-offset: 2px;
+  background: color-mix(in srgb, var(--theme-accent, #3b82f6) 8%, transparent) !important;
+}
 .is-sorting { border: 2px dashed rgba(59, 130, 246, 0.5); padding: 10px; border-radius: 16px; background: rgba(59, 130, 246, 0.05); }
 .sort-tip {
   margin: 0 16px 6px;

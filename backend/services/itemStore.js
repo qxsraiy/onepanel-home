@@ -61,10 +61,17 @@ const LEGACY_BLANK = {
 
 async function listAll({ locked = false, includeDeleted = false, strict = false } = {}) {
   const where = includeDeleted ? {} : { deletedAt: null };
+  // 【v3.35.0】按 order 排序（流式布局：order 决定先后，不再依赖 gridX/gridY）
+  // order 在加密 payload 里，所以必须解密后再排；id 兜底保证稳定
+  const sorted = (list) => list.sort((a, b) => {
+    const oa = Number(a.order ?? 0), ob = Number(b.order ?? 0);
+    if (oa !== ob) return oa - ob;
+    return (a.id || 0) - (b.id || 0);
+  });
   const rows = await db().item.findMany({ where, orderBy: { id: 'asc' } });
   // 【修复 P1-2】一张卡损坏不该让整个列表/批量操作 500。
   // 默认降级成"损坏占位卡"（corrupted:true），需要严格模式（删除/转移等写操作）时显式传 strict。
-  return rows.map((row) => {
+  const out = rows.map((row) => {
     try {
       return codec.unpackRow(row, { locked });
     } catch (e) {
@@ -78,6 +85,7 @@ async function listAll({ locked = false, includeDeleted = false, strict = false 
       };
     }
   });
+  return sorted(out);
 }
 
 async function listRaw({ includeDeleted = false } = {}) {

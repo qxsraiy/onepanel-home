@@ -3312,6 +3312,39 @@ app.post('/api/items', authenticateToken, ah(async (req, res) => {
   scheduleBackup();
 }));
 
+/**
+ * 【v3.35.0】批量重排（流式布局）
+ * 前端拖动卡片后，把整组新顺序传上来，后端按数组下标写 order。
+ * order 在加密 payload 里，所以走 itemStore.patch（会自动重新加密 + 标 dirty），
+ * 每条都要 recordChangeForItem 才会同步到其他节点。
+ */
+app.put('/api/items/reorder', authenticateToken, ah(async (req, res) => {
+  if (vault.isLocked()) return res.status(423).json({ error: '保险库未解锁：此时批量重排会误改全部卡片' });
+  const { orderedIds } = req.body || {};
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+    return res.status(400).json({ error: 'orderedIds 必须是非空数组' });
+  }
+  let changed = 0;
+  for (let i = 0; i < orderedIds.length; i += 1) {
+    const id = Number(orderedIds[i]);
+    if (!Number.isFinite(id)) continue;
+    try {
+      const row = await itemStore.getById(id);
+      if (!row) continue;
+      if (Number(row.order ?? 0) === i && !row.__wasReordered) {
+        // 位置没变也写一次：首次从 gridX/gridY 迁到 order 时需要落盘
+      }
+      await itemStore.patch(id, { order: i });
+      await recordChangeForItem(row.uid, 'upsert');
+      changed += 1;
+    } catch (e) {
+      console.warn('[reorder] 第 ' + i + ' 张失败:', e.message);
+    }
+  }
+  res.json({ success: true, changed });
+  scheduleBackup();
+}));
+
 app.put('/api/items/position', authenticateToken, ah(async (req, res) => {
   const { id, gridX, gridY, group } = req.body || {};
   if (vault.isLocked()) return res.status(423).json({ error: '保险库未解锁' });
