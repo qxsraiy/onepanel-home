@@ -1,6 +1,6 @@
 {
   "name": "onepanel-backend",
-  "version": "3.30.3",
+  "version": "3.31.0",
   "description": "OnePanel 个人数字枢纽后端（Express + Prisma/SQLite）",
   "main": "index.js",
   "scripts": {
@@ -26,6 +26,7 @@
     "@simplewebauthn/server": "^14.1.0",
     "axios": "^1.16.1",
     "bcryptjs": "^3.0.3",
+    "compression": "^1.8.2",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "express-rate-limit": "^7.5.0",

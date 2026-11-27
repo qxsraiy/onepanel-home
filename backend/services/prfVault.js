@@ -21,9 +21,16 @@ function prfSalt() {
   return crypto.createHash('sha256').update('onepanel-prf-salt-v1').digest();
 }
 
-/** PRF 输出（base64）→ 32 字节 KEK */
+/**
+ * PRF 输出 → 32 字节 KEK
+ * 【v3.30.4 修复】前端用 base64url（含 - 和 _）编码，原来按 'base64' 解码，
+ * Node 会静默丢弃这两个字符 → 约 74% 的随机输出发生错位，包裹解不开。
+ * 现在先归一成 base64url 再解，同时兼容旧的标准 base64。
+ */
 function kekFromPrf(prfOutputB64) {
-  const ikm = Buffer.from(String(prfOutputB64 || ''), 'base64');
+  const raw = String(prfOutputB64 || '').trim();
+  const normalized = raw.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const ikm = Buffer.from(normalized, 'base64url');
   if (ikm.length < 16) throw new Error('PRF 输出太短');
   return Buffer.from(crypto.hkdfSync('sha256', ikm, Buffer.alloc(0), Buffer.from(HKDF_INFO), KEY_LEN));
 }

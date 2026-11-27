@@ -39,6 +39,7 @@
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const compression = require('compression');
 const crypto = require('crypto');
 
 const express = require('express');
@@ -129,6 +130,18 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 
+/* 【v3.31.0】Gzip 压缩（用 compression 包：它能处理 static 的 pipe 场景，
+ * 手写 res.end 拦截对 res.write 流式输出无效）。
+ * 352KB JS → gzip 后约 110KB，首屏提速一倍。 */
+app.use(compression({
+  threshold: 1024,        // 小于 1KB 压了没意义
+  level: 6,
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+  },
+}));
+
 const corsOrigin = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()) : true;
 app.use(cors({ origin: corsOrigin }));
 // 【B-08】默认收紧到 8MB（原来 20MB，单个请求就能吃掉大量内存）；备份恢复接口单独放宽
@@ -197,7 +210,11 @@ async function initSystem() {
 
   syncEngine.init(prisma, itemStore);
   // 【自检修复 BUG-D】收到别人改密码后，本机的旧 JWT 也应失效
-  syncEngine.setOnConfigApplied(() => bumpTokenEpoch());
+  // 【v3.30.4】只有"别人改了密码"才吊销本机会话。
+  // 之前无差别吊销：任何配置同步（groups/theme/uiPrefs/notify/appToken）都会把所有人踢下线。
+  syncEngine.setOnConfigApplied((reason) => {
+    if (String(reason || '').includes('password-change')) bumpTokenEpoch();
+  });
   // 【P1-11】远端卡片变更后重建明文快照（防抖 2 秒），
   // 否则别的节点改了书签，本机的 App 快照会一直停在旧版本
   syncEngine.setOnItemsApplied(() => { try { scheduleSnapshotRebuild(); } catch { /* 忽略 */ } });
@@ -1720,6 +1737,10 @@ app.post('/api/join/from', joinLimiter, ah(async (req, res) => {
   // 【修复】入网时填的设备名必须真正落地（原来只解析没用）
   if (nodeName) {
     await nodeState.set('nodeName', nodeName);
+    await prisma.$executeRawUnsafe('UPDATE Member SET name = ? WHERE nodeId = ?', nodeName, me.nodeId).catch(() => {});
+  }
+  // 【v3.30.4】下面这些是"入网落地"，与设备名无关 —— 之前被误包在 if (nodeName) 里，
+  // 不填设备名的新节点会丢掉主题强调色 / UI 偏好 / 通行密钥。
   // 【P1-5】落地对端的主题强调色与 UI 偏好（AppToken 刻意不下发）
   if (snapshot.themeAccent && snapshot.themeAccent.themeAccent) {
     await prisma.$executeRawUnsafe(
@@ -1733,16 +1754,14 @@ app.post('/api/join/from', joinLimiter, ah(async (req, res) => {
       JSON.stringify(snapshot.themeAccent.uiPrefs).slice(0, 4000)
     ).catch(() => {});
   }
-  // 【v3.9.5】落地对端的 Passkey 记录，这样在这台新节点也能用同一把指纹
+  // 【v3.9.5】落地对端的 Passkey 记录（prfWrapped 置 null：跨设备 PRF 各用各的）
   for (const pk of snapshot.passkeys || []) {
     if (!pk || !pk.credentialId) continue;
     await prisma.$executeRawUnsafe(
-      'INSERT OR REPLACE INTO Passkey (credentialId, publicKey, counter, label, prfWrapped) VALUES (?, ?, ?, ?, ?)',
+      'INSERT OR REPLACE INTO Passkey (credentialId, publicKey, counter, label, prfWrapped) VALUES (?, ?, ?, ?, NULL)',
       String(pk.credentialId), String(pk.publicKey || ''), Number(pk.counter) || 0,
-      String(pk.label || '我的通行密钥').slice(0, 40), pk.prfWrapped || null
+      String(pk.label || '我的通行密钥').slice(0, 40)
     ).catch(() => {});
-  }
-    await prisma.$executeRawUnsafe('UPDATE Member SET name = ? WHERE nodeId = ?', nodeName, me.nodeId).catch(() => {});
   }
   // 其他成员的 name 从快照带回
   for (const m of snapshot.members || []) {
@@ -2376,7 +2395,14 @@ app.delete('/api/passkey/:credentialId', authenticateToken, ah(async (req, res) 
 
 // ====== 🔄 版本与升级（v3.11.0）======
 /** 当前版本（与 package.json 保持同步，发布时由 CI 替换） */
-const APP_VERSION = String(process.env.APP_VERSION || require('./package.json').version || '0.0.0');
+// 【v3.31.0】便携包 bin/ 下可能没有 package.json，这里必须容错
+const APP_VERSION = (() => {
+  if (process.env.APP_VERSION) return String(process.env.APP_VERSION);
+  try { return String(require('./package.json').version || '0.0.0'); } catch { /* 便携包没带 */ }
+  try { return String(require('../package.json').version || '0.0.0'); } catch { /* 也没有 */ }
+  try { return String(fs.readFileSync(path.join(__dirname, '.version'), 'utf8').trim() || '0.0.0'); } catch { /* 也没有 */ }
+  return '0.0.0';
+})();
 
 /** 判断当前安装形态：script / portable / docker / dev */
 function detectInstallType() {
@@ -2385,12 +2411,21 @@ function detectInstallType() {
   // 单文件版会在可执行文件同级放 marker
   try {
     if (fs.existsSync(path.join(process.cwd(), 'portable.marker'))) return 'portable';
+    // 【v3.31.0】也兼容 marker 在脚本同级（bin/）
+    if (fs.existsSync(path.join(__dirname, 'portable.marker'))) return 'portable';
   } catch { /* 忽略 */ }
-  // 脚本版：/opt/onepanel/current 是软链接
-  try {
-    const cur = '/opt/onepanel/current';
-    if (fs.existsSync(cur) && fs.lstatSync(cur).isSymbolicLink()) return 'script';
-  } catch { /* 忽略 */ }
+  // 脚本版：{安装目录}/current 是软链接（或目录，某些文件系统 ln -s 退化）
+  // 【v3.30.4】不再写死 /opt/onepanel，支持自定义安装目录
+  const roots = [process.env.OP_INSTALL_DIR, process.env.ONEPANEL_HOME, '/opt/onepanel'].filter(Boolean);
+  for (const root of roots) {
+    try {
+      const cur = path.join(String(root), 'current');
+      if (!fs.existsSync(cur)) continue;
+      if (fs.lstatSync(cur).isSymbolicLink()) return 'script';
+      // 目录形态：能读到 .version 也算已安装
+      if (fs.existsSync(path.join(cur, '.version'))) return 'script';
+    } catch { /* 忽略 */ }
+  }
   return 'dev';
 }
 
@@ -2483,11 +2518,23 @@ app.post('/api/system/upgrade', authenticateToken, ah(async (req, res) => {
     return res.status(400).json({ error: '当前安装形态不支持一键升级，请手动更新（详见设置 → 关于）', installType: detectInstallType() });
   }
   if (upgradeJob.running) return res.status(409).json({ error: '已有升级在进行' });
-  const script = '/opt/onepanel/current/manage.sh';
-  if (!fs.existsSync(script)) return res.status(500).json({ error: '找不到 manage.sh，无法升级' });
+  // 【v3.30.4】manage.sh 早已合并进 op.sh，独立升级脚本叫 upgrade.sh
+  // 路径按实际安装形态探测，不再写死 /opt/onepanel
+  const installRoots = [
+    process.env.OP_INSTALL_DIR,
+    process.env.ONEPANEL_HOME,
+    '/opt/onepanel',
+    path.join(process.cwd(), '..'),
+  ].filter(Boolean);
+  let script = '';
+  for (const root of installRoots) {
+    const p = path.join(String(root), 'current', 'upgrade.sh');
+    if (fs.existsSync(p)) { script = p; break; }
+  }
+  if (!script) return res.status(500).json({ error: '找不到 upgrade.sh，无法升级（请用命令行 bash /opt/onepanel/current/upgrade.sh）' });
   upgradeJob = { running: true, startedAt: Date.now(), log: [], code: null };
   const { spawn } = require('child_process');
-  const child = spawn('bash', [script, 'upgrade', '--auto'], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn('bash', [script, '--auto'], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   const push = (s) => {
     upgradeJob.log.push(String(s).slice(0, 500));
     if (upgradeJob.log.length > 200) upgradeJob.log.shift();
@@ -2638,9 +2685,19 @@ app.get('/api/app/icon/:uid', authenticateApp, ah(async (req, res) => {
   let buf;
   try { buf = Buffer.from(m[2], 'base64'); } catch { return res.status(500).json({ error: '图标数据损坏' }); }
   if (!buf.length) return res.status(404).json({ error: '图标为空' });
-  res.setHeader('Content-Type', m[1].toLowerCase());
-  res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+  const mime = m[1].toLowerCase();
+  res.setHeader('Content-Type', mime);
+  // 【v3.30.4】① nosniff 防 MIME 嗅探
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  // ② SVG 能执行脚本 → 强制 sandbox，绝不能当同源图片
+  if (mime === 'image/svg+xml') {
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+  }
+  // ③ 原来是 public/86400/immutable —— 换图标时 :uid 不变会死缓存 24 小时
+  res.setHeader('Cache-Control', 'private, max-age=300');
   res.setHeader('Content-Length', String(buf.length));
+  // 【v3.30.4 补】必须真的把响应体发出去 —— 上一步编辑时误删了这行，
+  // 只设 Content-Length 不发 body 会让所有图标请求挂到超时。
   res.send(buf);
 }));
 
@@ -2693,6 +2750,8 @@ app.get('/api/app/tokens', authenticateToken, ah(async (req, res) => {
 app.delete('/api/app/token/:prefix', authenticateToken, ah(async (req, res) => {
   await ensureAppTables();
   const prefix = String(req.params.prefix || '');
+  // 【v3.30.4】前缀太短会误删第一条匹配的 Token（比如传 'op_'）
+  if (prefix.length < 8) return res.status(400).json({ error: 'Token 前缀过短（至少 8 位）' });
   const rows = await prisma.$queryRawUnsafe('SELECT token FROM AppToken').catch(() => []);
   const hit = (rows || []).find((r) => String(r.token).startsWith(prefix));
   if (!hit) return res.status(404).json({ error: '未找到该 Token' });
@@ -2840,6 +2899,8 @@ app.post('/api/change-password', ah(async (req, res) => {
     console.warn('⚠️ 广播首登改密失败（本机已生效）:', e.message);
   }
   const newToken = jwt.sign({ id: 1, username: String(newUsername).trim(), epoch: tokenEpoch }, JWT_SECRET, { expiresIn: '30d' });
+  // 【v3.30.4】同上：改密后刷新 Cookie
+  res.setHeader('Set-Cookie', authCookie(newToken, undefined, req));
   res.json({ success: true, token: newToken });
 }));
 
@@ -2944,6 +3005,8 @@ app.put('/api/config/account', authenticateToken, ah(async (req, res) => {
     console.warn('⚠️ 广播改密码失败（本机已生效）:', e.message);
   }
   const newToken = jwt.sign({ id: 1, username: String(newUsername).trim(), epoch: tokenEpoch }, JWT_SECRET, { expiresIn: '30d' });
+  // 【v3.30.4】改密后 epoch 变了，必须把新 Cookie 发给浏览器，否则下次请求 403
+  res.setHeader('Set-Cookie', authCookie(newToken, undefined, req));
   res.json({ success: true, token: newToken });
 }));
 
@@ -3925,6 +3988,11 @@ app.use(express.static(publicPath, {
     // sw.js / index.html 不能被长缓存，否则更新永远不生效
     if (filePath.endsWith('sw.js') || filePath.endsWith('index.html')) {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+      return;
+    }
+    // 【v3.31.0】Vite 产物文件名带内容哈希，放心长缓存（之前没设 → 每次重下 352KB）
+    if (filePath.includes(path.sep + 'assets' + path.sep)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     }
   },
 }));

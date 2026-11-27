@@ -296,6 +296,9 @@ async function applyChange(change) {
         const info = JSON.parse(change.payload || ' {}');
         const kind = String(info.kind || '');
         const data = info.data || {};
+        // 【v3.30.4】进入 config-sync 时把 result 标成 pending：
+        // 各分支处理成功就不改它，最后统一置为 applied（这样才会写 AppliedChange + 中继）
+        result = { applied: false, reason: 'config-pending' };
         const nowIso = new Date().toISOString();
         if (kind === 'groups') {
           // 【v3.30.0 关键修复】以前取"并集"，只能加不能减：
@@ -331,7 +334,6 @@ async function applyChange(change) {
               }
             }
           }
-        } else if (kind === 'theme') {
         } else if (kind === 'theme') {
           // 【修复】themeAccent 是后加列，Prisma client 未重新生成时会报 Unknown argument，
           // 必须像 index.js 一样用 raw SQL 单独写；其余字段走 Prisma。
@@ -401,7 +403,7 @@ async function applyChange(change) {
         } else {
           result = { applied: false, reason: 'unknown-config-kind' };
         }
-        if (!result) {
+        if (result.reason === 'config-pending') {
           if (typeof onConfigApplied === 'function') {
             try { onConfigApplied('config-sync:' + kind); } catch { /* 忽略 */ }
           }

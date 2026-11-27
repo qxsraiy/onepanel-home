@@ -24,8 +24,15 @@ function openDb() {
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' });
       if (!db.objectStoreNames.contains(META)) db.createObjectStore(META, { keyPath: 'key' });
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      // 【v3.30.4】别的标签页要升级 DB 时主动让路，否则那边会一直卡住
+      db.onversionchange = () => { try { db.close(); } catch { /* 忽略 */ } };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
+    // 【v3.30.4】未来升 DB_VERSION 时若用户开着多个标签页，没有这个回调会永久挂起
+    req.onblocked = () => reject(new Error('数据库被其他标签页占用，请关闭其它页面后重试'));
   });
 }
 

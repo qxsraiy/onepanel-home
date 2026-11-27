@@ -120,20 +120,20 @@ jobs:
           npm run build
 
       - name: 打包单文件版
-        working-directory: backend
         shell: pwsh
         run: |
+          # 后端依赖（含 dev 里没有、只有运行时的部分）
+          Push-Location backend
           npm ci --omit=dev --no-audit --no-fund
           npx prisma generate
-          $ver = (Get-Content package.json | ConvertFrom-Json).version
-          $out = "..\dist\onepanel-portable-v$ver-win-x64"
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
-          Copy-Item -Recurse -Force . "$out\backend"
-          Copy-Item -Recurse -Force ..\frontend\dist\* "$out\backend\public\"
-          Set-Content "$out\portable.marker" "v$ver"
-          Get-ChildItem "$out\backend\node_modules\.bin" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
-          Get-ChildItem "$out\backend\prisma\*.db" -ErrorAction SilentlyContinue | Remove-Item -Force
-          Compress-Archive -Path $out -DestinationPath "..\dist\onepanel-portable-v$ver-win-x64.zip" -Force
+          Pop-Location
+          $ver = (Get-Content backend/package.json | ConvertFrom-Json).version
+          $env:OP_PORTABLE_OUT = "$PWD\dist\onepanel-portable-v$ver-win-x64"
+          # 走 build-portable.mjs：内部会裁剪 Prisma 冗余引擎（448MB -> 193MB）
+          node scripts/build-portable.mjs
+          if ($LASTEXITCODE -ne 0) { throw "build-portable 失败" }
+          Compress-Archive -Path $env:OP_PORTABLE_OUT -DestinationPath "dist/onepanel-portable-v$ver-win-x64.zip" -Force
+          Write-Host "便携包：$((Get-Item "dist/onepanel-portable-v$ver-win-x64.zip").Length / 1MB) MB"
 
       - uses: actions/upload-artifact@v4
         with:

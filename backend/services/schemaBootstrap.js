@@ -104,6 +104,25 @@ async function ensureTables(prisma) {
 }
 
 async function ensureSchema(prisma) {
+  // 【v3.31.0】SQLite 调优：同步引擎、状态监测、快照重建、前端读写会并发访问，
+  // 不开 WAL 会偶发 SQLITE_BUSY 锁冲突（表现为"保存失败，请重试"）。
+  // journal_mode 会返回结果集，必须用 $queryRawUnsafe；WAL 是数据库级持久设置，成功一次即永久生效
+  for (const sql of [
+    'PRAGMA journal_mode = WAL',
+    'PRAGMA synchronous = NORMAL',
+    'PRAGMA busy_timeout = 5000',
+    'PRAGMA foreign_keys = ON',
+  ]) {
+    try {
+      const r = await prisma.$queryRawUnsafe(sql);
+      if (sql.includes('journal_mode')) {
+        const mode = Array.isArray(r) ? Object.values(r[0] || {})[0] : null;
+        console.log('[sqlite] ' + sql + ' -> ' + (mode || 'ok'));
+      }
+    } catch (e) {
+      try { await prisma.$executeRawUnsafe(sql); } catch { /* 跳过 */ }
+    }
+  }
   // 先建后加的表（不依赖 schema.sql）
   try { await ensureTables(prisma); } catch { /* 忽略 */ }
   // 先补列（表已存在的场景），再走建表流程
