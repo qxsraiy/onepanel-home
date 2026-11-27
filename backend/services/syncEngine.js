@@ -123,6 +123,14 @@ function notifyItemsApplied() {
 /** 【E-02】seq 上限：超过 JS 安全整数会导致精度丢失、幂等失效 */
 const MAX_SAFE_SEQ = Number.MAX_SAFE_INTEGER;
 
+/** 【v3.32.0】HLC 脏标记：批量拉取时不再每条变更都写一次 SQLite（200 条 = 1 次写） */
+let hlcDirty = false;
+async function flushHlc() {
+  if (!hlcDirty) return;
+  hlcDirty = false;
+  try { await nodeState.set('hlc', hlcClock.encode(selfNodeId())); } catch { /* 忽略 */ }
+}
+
 async function applyChange(change) {
   if (change && Number(change.seq) > MAX_SAFE_SEQ) return { applied: false, reason: 'seq-out-of-range' };
   if (!change || !change.changeId) return { applied: false, reason: 'malformed' };
@@ -162,7 +170,8 @@ async function applyChange(change) {
 
   // 收到远端时间戳：抬升本地 HLC
   hlcClock.receive(change.hlc, selfNodeId());
-  await nodeState.set('hlc', hlcClock.encode(selfNodeId()));
+  // 【v3.32.0】只打脏标记，等批量循环结束统一 flush（200 条变更 = 1 次写，不是 200 次）
+  hlcDirty = true;
 
   let result = { applied: false, reason: 'ignored' };
   if (change.entity === 'item') {
@@ -668,7 +677,6 @@ async function syncWithPeer(member) {
       }
       if (!pull.result.hasMore || incoming.length === 0) break;
     }
-
     await db().member.update({
       where: { nodeId: peerId },
       data: { lastSyncAt: new Date(), lastSeen: new Date(), status: 'active' },
@@ -683,6 +691,10 @@ async function syncWithPeer(member) {
     state.nextAt = Date.now() + backoff;
     peerState.set(peerId, state);
     return { ok: false, error: e.message, failures: state.failures, nextInMs: backoff };
+  } finally {
+    // 【v3.32.0】无论成功还是中途异常，都要把已成活的 HLC 落盘
+    // （第 1 轮已 applyChange 抬升了内存时钟，第 2 轮超时也要保住）
+    await flushHlc();
   }
 }
 
@@ -723,4 +735,4 @@ const getPeerState = () => Object.fromEntries(peerState);
 module.exports = {init, start, stop, syncOnce, syncWithPeer, clampPushedCursors, localVector, setOnConfigApplied,
   applyChange, verifyChange, signChange, signRequest, payloadDigest,
   getCursor, setCursor, pendingFor, markPushedTo,
-  getPeerState, selfNodeId, TIMEOUT_MS, setOnItemsApplied };
+  getPeerState, selfNodeId, TIMEOUT_MS, flushHlc, setOnItemsApplied };

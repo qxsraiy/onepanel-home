@@ -1,13 +1,16 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, defineAsyncComponent } from 'vue'
 import axios from 'axios'
-import SettingsPanel from './components/SettingsPanel.vue'
+// 【v3.32.0】懒加载：设置面板 48.8KB 只在点开时才下载
+const SettingsPanel = defineAsyncComponent(() => import('./components/SettingsPanel.vue'))
 import AppIcon from './components/AppIcon.vue'
 import DashboardWidget from './components/DashboardWidget.vue'
 import SelectBox from './components/SelectBox.vue'
-import SetupWizard from './components/SetupWizard.vue'
+// 初始化向导 14.1KB：首次访问才需要
+const SetupWizard = defineAsyncComponent(() => import('./components/SetupWizard.vue'))
 import ConfirmDialog from './components/ConfirmDialog.vue'
-import PasskeyPanel from './components/PasskeyPanel.vue'
+// 通行密钥面板 10.7KB
+const PasskeyPanel = defineAsyncComponent(() => import('./components/PasskeyPanel.vue'))
 import {
   readJSON, writeJSON, writeText, hexToRgba, safeHex,
   clampMenuPosition, sanitizeFooter, isMobileWidth, toast, copyToClipboard,
@@ -786,10 +789,56 @@ const formData = ref(emptyForm())
 
 const openAddModal = () => { editingId.value = null; formData.value = emptyForm(); showModal.value = true }
 
-const handleImageUpload = (event) => {
+/**
+ * 【v3.32.0】上传的图片先压成 128×128 WebP：
+ *   一张 500KB 的 PNG → 通常 < 5KB
+ *   好处：主界面渲染快、IndexedDB 小、能直接进 App 快照（不用额外打 /api/app/icon/:uid）
+ *   fallback：浏览器不支持 WebP 编码时退回原图
+ */
+const compressIcon = (file) => new Promise((resolve) => {
+  const img = new Image()
+  const url = URL.createObjectURL(file)
+  img.onload = () => {
+    try {
+      const MAX = 128
+      let w = img.naturalWidth || MAX
+      let h = img.naturalHeight || MAX
+      const scale = Math.min(1, MAX / Math.max(w, h))
+      w = Math.max(1, Math.round(w * scale))
+      h = Math.max(1, Math.round(h * scale))
+      const canvas = document.createElement("canvas")
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext("2d")
+      ctx.imageSmoothingQuality = "high"
+      ctx.drawImage(img, 0, 0, w, h)
+      // 先试 WebP，不支持就退 PNG
+      let out = canvas.toDataURL("image/webp", 0.82)
+      if (!out || !out.startsWith("data:image/webp")) out = canvas.toDataURL("image/png")
+      resolve(out)
+    } catch {
+      resolve(null)
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+  }
+  img.onerror = () => { URL.revokeObjectURL(url); resolve(null) }
+  img.src = url
+})
+
+const handleImageUpload = async (event) => {
   const file = event.target.files[0]
   if (!file) return
   if (file.size > 2 * 1024 * 1024) { toast('图片太大了！请选择 2MB 以下的图片', 'warn'); event.target.value = ''; return }
+  // 先尝试压缩（SVG 不压，压缩会丢矢量）
+  if (!/svg|gif/i.test(file.type)) {
+    const squeezed = await compressIcon(file)
+    if (squeezed && squeezed.length < 200 * 1024) {
+      formData.value.icon = squeezed
+      event.target.value = ''
+      return
+    }
+  }
   const reader = new FileReader()
   reader.onload = (e) => { formData.value.icon = e.target.result; event.target.value = '' }
   reader.onerror = () => { toast('读取图片失败', 'error'); event.target.value = '' }

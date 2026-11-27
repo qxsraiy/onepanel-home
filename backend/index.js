@@ -877,6 +877,9 @@ app.post('/api/sync/changes', authenticateNode, ah(async (req, res) => {
     else results.rejected += 1;
     if (!r.applied && r.reason !== 'duplicate') results.details.push({ changeId: change.changeId, reason: r.reason });
   }
+  // 【v3.32.0】被动推送也要把 HLC 落盘：否则本节点在下次 pull 前重启，
+  // 这批收到的时钟抬升就丢了（会导致重复应用已旧的变更）。
+  try { await syncEngine.flushHlc(); } catch { /* 忽略 */ }
   res.json({ ok: true, ...results });
 }));
 

@@ -1,15 +1,15 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, defineAsyncComponent } from 'vue'
 import axios from 'axios'
 import AppIcon from './AppIcon.vue'
 import { saveAs } from 'file-saver'
 import SelectBox from './SelectBox.vue'
 import PasskeyPanel from './PasskeyPanel.vue'
-import ApiDocs from './ApiDocs.vue'
-import AboutPanel from './AboutPanel.vue'
-import ExtensionPanel from './ExtensionPanel.vue'
-import GroupManager from './GroupManager.vue'
-import SyncPanel from './SyncPanel.vue'
+const ApiDocs = defineAsyncComponent(() => import('./ApiDocs.vue'))
+const AboutPanel = defineAsyncComponent(() => import('./AboutPanel.vue'))
+const ExtensionPanel = defineAsyncComponent(() => import('./ExtensionPanel.vue'))
+const GroupManager = defineAsyncComponent(() => import('./GroupManager.vue'))
+const SyncPanel = defineAsyncComponent(() => import('./SyncPanel.vue'))
 import { readJSON, writeText, safeHex, toast } from '../utils/common'
 import { applyThemeToBody, DEFAULT_BG, DEFAULT_COLOR } from '../utils/theme'
 
