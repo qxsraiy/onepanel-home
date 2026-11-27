@@ -267,18 +267,10 @@ async function syncNow() {
   } finally { busy.value = false; }
 }
 
-async function revoke(member) {
-  // 轻量确认：用 toast 二次点击替代原生 confirm（原生弹窗破坏观感）
-  if (!kickArmed || kickArmed.nodeId !== member.nodeId) {
-    kickArmed = { nodeId: member.nodeId }
-    toast('再点一次确认踢出 ' + String(member.nodeId || '').slice(0, 6), 'warn', 4000)
-    return
-  }
-
 /** 彻底删除已踢出的成员（从本地 Member 表移除，不再显示） */
 async function removeMember(member) {
   const label = member.name || shortId(member.nodeId);
-  if (!confirm(`确定要彻底删除「${label}」吗？\n\n这会把它从网络成员列表里移除，不影响它自己的数据。`)) return
+  if (!confirm('确定要彻底删除「' + label + '」吗？\n\n这会把它从网络成员列表里移除，不影响它自己的数据。')) return
   try {
     await axios.delete('/api/sync/member/' + encodeURIComponent(member.nodeId));
     toast('已删除', 'success');
@@ -287,6 +279,15 @@ async function removeMember(member) {
     toast(e.response?.data?.error || '删除失败', 'error');
   }
 }
+
+async function revoke(member) {
+  // 轻量确认：用 toast 二次点击替代原生 confirm（原生弹窗破坏观感）
+  if (!kickArmed || kickArmed.nodeId !== member.nodeId) {
+    kickArmed = { nodeId: member.nodeId }
+    toast('再点一次确认踢出 ' + String(member.nodeId || '').slice(0, 6), 'warn', 4000)
+    return
+  }
+
   kickArmed = null
   busy.value = true;
   try {

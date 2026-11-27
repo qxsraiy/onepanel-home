@@ -2634,7 +2634,7 @@ onUnmounted(() => {
 .modal-content::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--theme-color) 20%, transparent); border-radius: 3px; }
 .form-group { margin-bottom: 16px; display: flex; flex-direction: column; }
 .form-row { display: flex; gap: 12px; }
-.flex-1 { flex: 1; } .flex-2 { flex: 2; }
+.flex-1 { flex: 1; min-width: 0; } .flex-2 { flex: 2; min-width: 0; }
 .form-group > label { font-size: 12px; margin-bottom: 6px; color: color-mix(in srgb, var(--theme-color) 75%, transparent) !important; }
 
 /* 原生 select 在暗色主题下会退化成白底白字（修 2） */
