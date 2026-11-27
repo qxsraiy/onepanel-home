@@ -76,6 +76,34 @@ const doDelete = async () => {
   } finally { busy.value = false }
 }
 
+/**
+ * 【v3.33.0】分组排序：上下移动
+ * 顺序就是 groups 数组的顺序，后端 /api/config/groups 会原样保存并广播，
+ * 所以这里改完数组发出去，其他节点通过 config-sync 的 groups 分支（LWW）跟随。
+ */
+const canMoveUp = (i) => i > 0 && !busy.value
+const canMoveDown = (i) => i < props.groups.length - 1 && !busy.value
+
+const moveGroup = (index, delta) => {
+  const list = [...props.groups]
+  const to = index + delta
+  if (to < 0 || to >= list.length) return
+  const [item] = list.splice(index, 1)
+  list.splice(to, 0, item)
+  emit('update-groups-immediate', list)
+  toast('已调整为第 ' + (to + 1) + ' 位', 'success', 2000)
+}
+
+// 一键恢复默认顺序（书签在最前，其余按字母）
+const sortAlphabetically = () => {
+  const list = [...props.groups]
+  const hasDefault = list.includes(DEFAULT_GROUP)
+  const rest = list.filter((g) => g !== DEFAULT_GROUP).sort((a, b) => a.localeCompare(b, 'zh-CN'))
+  const next = hasDefault ? [DEFAULT_GROUP, ...rest] : rest
+  emit('update-groups-immediate', next)
+  toast('已按名称排序', 'success', 2000)
+}
+
 const removeGroupFromArray = (groupName) => {
   emit('update-groups-immediate', props.groups.filter((g) => g !== groupName))
   deleteTarget.value = null
@@ -89,10 +117,17 @@ const removeGroupFromArray = (groupName) => {
       <input v-model="newGroup" type="text" placeholder="输入新分组名称，回车创建" class="glass-input flex-1" @keyup.enter="addGroup" />
       <button class="btn-primary" :disabled="!newGroup.trim()" @click="addGroup">新增分组</button>
     </div>
+    <!-- 排序辅助：一键按名称排（书签始终在最前） -->
+    <div v-if="groups.length > 1" class="sort-hint-row">
+      <span class="sort-hint">顺序即分组在首页的显示顺序，可用 ▲▼ 调整</span>
+      <button class="btn-outline sort-btn" @click="sortAlphabetically">
+        <AppIcon icon="mdi:sort-alphabetical-ascending" /> 按名称排序
+      </button>
+    </div>
 
     <!-- 列表：一行一个，沿用原来的胶囊配色 -->
     <div class="group-rows mt-3">
-      <div v-for="g in groups" :key="g" class="group-row">
+      <div v-for="(g, index) in groups" :key="g" class="group-row">
         <template v-if="renaming === g">
           <input v-model="renameValue" type="text" class="glass-input flex-1" @keyup.enter="commitRename" @keyup.esc="cancelRename" />
           <button class="btn-primary row-btn" :disabled="busy" @click="commitRename">保存</button>
@@ -102,6 +137,25 @@ const removeGroupFromArray = (groupName) => {
           <span class="group-name">{{ g }}</span>
           <span v-if="g === '书签'" class="group-default">默认</span>
           <span class="row-spacer"></span>
+          <!-- 排序：上下箭头（顺序即 groups 数组顺序，会随 config-sync 同步） -->
+          <button
+            class="row-action"
+            title="上移"
+            :disabled="!canMoveUp(index)"
+            :style="!canMoveUp(index) ? 'opacity:.28;cursor:not-allowed' : ''"
+            @click.stop="moveGroup(index, -1)"
+          >
+            <AppIcon icon="mdi:chevron-up" />
+          </button>
+          <button
+            class="row-action"
+            title="下移"
+            :disabled="!canMoveDown(index)"
+            :style="!canMoveDown(index) ? 'opacity:.28;cursor:not-allowed' : ''"
+            @click.stop="moveGroup(index, 1)"
+          >
+            <AppIcon icon="mdi:chevron-down" />
+          </button>
           <button class="row-action" title="改名称" @click="startRename(g)"><AppIcon icon="mdi:pencil-outline" /></button>
           <button v-if="g !== '书签'" class="row-action row-danger" title="删除分组" @click="promptDelete(g)"><AppIcon icon="mdi:close" /></button>
         </template>
@@ -211,4 +265,8 @@ const removeGroupFromArray = (groupName) => {
 .mode-text b { font-size: 12.5px; font-weight: 600; color: var(--theme-color); }
 .mode-text span { font-size: 11.5px; color: color-mix(in srgb, var(--theme-color) 55%, transparent); }
 .mode-select { margin-left: auto; width: 168px; flex-shrink: 0; }
+/* 【v3.33.0】分组排序辅助行 */
+.sort-hint-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.sort-hint { font-size: 11.5px; opacity: .55; flex: 1; min-width: 140px; }
+.sort-btn { font-size: 12px; padding: 6px 12px; display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
 </style>

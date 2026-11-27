@@ -778,7 +778,7 @@ const pickSearchResult = (item, idx) => {
 const showModal = ref(false)
 const editingId = ref(null)
 const emptyForm = () => ({
-  name: '', description: '', icon: '', bgColor: '', bgOpacity: globalSettings.value.cardBgOpacity ?? 0.4,
+  name: '', description: '', icon: '', bgColor: '', bgOpacity: globalSettings.value.cardBgOpacity ?? 0.4, useCustomBg: false,
   isMonitored: false, pingUrl: '',
   isHidden: false,
   widgetType: '', widgetConfig: null, weatherCity: '上海', openMethod: 'new_tab',
@@ -881,12 +881,18 @@ const saveItem = async () => {
     const payload = {
       ...formData.value,
       urls: validUrls,
+      // 【v3.33.0】开关关着 → 清空背景色，回落到全局预设
+      bgColor: formData.value.useCustomBg ? (formData.value.bgColor || '') : '',
+      bgOpacity: formData.value.useCustomBg
+        ? (formData.value.bgOpacity ?? 0.4)
+        : (globalSettings.value.cardBgOpacity ?? 0.4),
       // 天气城市走 widgetConfig 存 JSON，其它小组件暂时不带参数
       widgetConfig: formData.value.widgetType === 'weather'
         ? JSON.stringify({ city: (formData.value.weatherCity || '').trim() || '上海' })
         : null,
     }
     delete payload.weatherCity
+    delete payload.useCustomBg   // 纯前端状态，不入库
     if (editingId.value) await axios.put(`/api/items/${editingId.value}`, payload)
     else await axios.post('/api/items', payload)
     showModal.value = false
@@ -1001,6 +1007,8 @@ const editItem = () => {
     description: item.description || '',
     icon: item.icon,
     bgColor: item.bgColor || '',
+    // 【v3.33.0】已有背景色 → 开关自动打开
+    useCustomBg: !!(item.bgColor && String(item.bgColor).trim()),
     bgOpacity: item.bgOpacity ?? globalSettings.value.cardBgOpacity ?? 0.4,
     isMonitored: !!item.isMonitored,
     pingUrl: item.pingUrl || '',
@@ -2300,12 +2308,18 @@ onUnmounted(() => {
               </a>
             </div>
           </div>
-
-          <div class="form-row">
-            <div class="form-group flex-1"><label>独立卡片背景色</label><input v-model="formData.bgColor" type="color" class="color-picker" title="留空则跟随全局" /></div>
-            <div class="form-group flex-2"><label>透明度 (0-1)</label><input v-model.number="formData.bgOpacity" type="range" min="0" max="1" step="0.1" class="slider" /></div>
+          <!-- 【v3.33.0】独立背景色改成开关：默认关，打开后才作用于这张卡 -->
+          <div class="form-group row-checkbox">
+            <label class="switch"><input type="checkbox" v-model="formData.useCustomBg"><span class="slider-round"></span></label>
+            <span class="switch-text">
+              独立卡片背景色
+              <i v-if="!formData.useCustomBg">不设置就用全局预设</i>
+            </span>
           </div>
-
+          <div v-if="formData.useCustomBg" class="form-row">
+            <div class="form-group flex-1"><label>背景色</label><input v-model="formData.bgColor" type="color" class="color-picker" /></div>
+            <div class="form-group flex-2"><label>透明度 (0-1)</label><input v-model.number="formData.bgOpacity" type="number" min="0" max="1" step="0.05" class="glass-input full-w" /></div>
+          </div>
 
           
           <div class="form-group row-checkbox">

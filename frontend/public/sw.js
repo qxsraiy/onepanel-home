@@ -43,8 +43,12 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const clone = res.clone();
-          caches.open(STATIC_CACHE).then((cache) => cache.put('/index.html', clone));
+          // 【v3.33.0】只缓存真正的 200：反代/网关偶发 502/503 时若写进 /index.html，
+          // 之后离线或网络抖动会一直渲染错误页，而且很难自愈。
+          if (res && res.ok && res.status === 200) {
+            const clone = res.clone();
+            caches.open(STATIC_CACHE).then((cache) => cache.put('/index.html', clone));
+          }
           return res;
         })
         .catch(() => caches.match('/index.html'))
