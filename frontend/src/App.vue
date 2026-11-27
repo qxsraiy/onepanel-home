@@ -1616,7 +1616,7 @@ onUnmounted(() => {
             <button class="btn-primary flex-1" style="padding: 12px" @click="handleVerify2FA">验证并进入</button>
           </div>
           <button
-            class="btn-outline full-w mt-2" style="padding: 11px"
+            class="btn-outline full-w" style="padding: 11px; margin-top: 14px"
             :disabled="passkeyBusy" @click="handlePasskeyLogin"
           >
             {{ passkeyBusy ? '验证中…' : '🔐 改用通行密钥登录' }}

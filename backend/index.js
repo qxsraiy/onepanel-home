@@ -1188,7 +1188,7 @@ app.post('/api/sync/peers', authenticateToken, ah(async (req, res) => {
 app.delete('/api/sync/member/:nodeId', authenticateToken, ah(async (req, res) => {
   const nodeId = String(req.params.nodeId || '').trim();
   if (!nodeId) return res.status(400).json({ error: '缺少 nodeId' });
-  if (nodeId === nodeSelfId()) return res.status(400).json({ error: '不能删除自己' });
+  if (nodeId === nodeIdentity.self().nodeId) return res.status(400).json({ error: '不能删除自己' });
   const row = await prisma.member.findUnique({ where: { nodeId } }).catch(() => null);
   if (!row) return res.status(404).json({ error: '成员不存在' });
   // 只允许删已踢出的，避免误删在线节点

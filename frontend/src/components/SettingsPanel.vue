@@ -795,7 +795,8 @@ const handleCloseCheck = async () => {
 .form-row { display: flex; gap: 20px; align-items: flex-start; }
 .form-row > * > label { display: block; min-height: 18px; margin-bottom: 6px; }
 .form-row .slider { margin-top: 6px; }
-.flex-1 { flex: 1; } .flex-2 { flex: 2; }
+/* 严格等分：basis 0 保证不受内容宽度影响 */
+.flex-1 { flex: 1 1 0%; min-width: 0; } .flex-2 { flex: 2 2 0%; min-width: 0; }
 .mt-3 { margin-top: 16px; } .mt-4 { margin-top: 24px; }
 .full-w { width: 100%; box-sizing: border-box; resize: vertical; }
 
@@ -823,7 +824,7 @@ const handleCloseCheck = async () => {
 .form-row > .flex-1 > label,
 .form-row > .flex-2 > label { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.color-picker { -webkit-appearance: none; border: none; width: 100%; height: 40px; border-radius: 8px; cursor: pointer; background: none; }
+.color-picker { -webkit-appearance: none; border: none; display: block; width: 100%; box-sizing: border-box; height: 40px; border-radius: 8px; cursor: pointer; background: none; }
 .color-picker::-webkit-color-swatch { border: 1px solid color-mix(in srgb, var(--theme-color) 20%, transparent); border-radius: 8px; }
 
 .slider { width: 100%; margin-top: 10px; }
