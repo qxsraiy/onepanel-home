@@ -298,17 +298,40 @@ async function applyChange(change) {
         const data = info.data || {};
         const nowIso = new Date().toISOString();
         if (kind === 'groups') {
-          // 【E-07】分组必须取"并集"，不能整体覆盖（LWW）：
-          //   A 节点加「分组X」、B 节点同时加「分组Y」
-          //   → 整体覆盖会导致先到的那个被冲掉，卡片掉进「未分组」
-          const incoming = Array.isArray(data) ? data.map((g) => String(g).trim()).filter(Boolean) : [];
-          const cur = await db().appConfig.findUnique({ where: { id: 1 } });
-          let local = [];
-          try { local = JSON.parse(cur?.groups || '[]'); } catch { local = []; }
-          const merged = [...new Set([...local, ...incoming])];
-          if (merged.length && JSON.stringify(merged) !== JSON.stringify(local)) {
-            await db().appConfig.update({ where: { id: 1 }, data: { groups: JSON.stringify(merged) } });
+          // 【v3.30.0 关键修复】以前取"并集"，只能加不能减：
+          //   改分组名 → 旧名+新名都在（看起来像没同步）
+          //   删分组   → 删不掉，又回来了
+          // 现在改成"整体覆盖"（LWW），但要防止并发丢分组：
+          //   发送端在 payload 里带 updatedAt，接收端只接受更新的。
+          // data 可能是数组（旧节点）或 { groups: [...], updatedAt } （v3.30.0+）
+          const rawList = Array.isArray(data) ? data : (Array.isArray(data.groups) ? data.groups : []);
+          const updatedAt = Array.isArray(data) ? 0 : Number(data.updatedAt || 0) || 0;
+          const incoming = rawList.map((g) => String(g).trim()).filter(Boolean);
+          if (!incoming.length) {
+            result = { applied: false, reason: 'empty-groups' };
+          } else {
+            const cur = await db().appConfig.findUnique({ where: { id: 1 } });
+            let local = [];
+            try { local = JSON.parse(cur?.groups || '[]'); } catch { local = []; }
+            let curAt = 0;
+            try {
+              const rows = await db().$queryRawUnsafe("SELECT value FROM NodeState WHERE key = 'groupsUpdatedAt'");
+              curAt = Number((rows && rows[0] && rows[0].value) || 0) || 0;
+            } catch { curAt = 0; }
+            const incAt = Number(updatedAt || 0) || 0;
+            // 没有时间戳时按"后到为准"（兼容旧节点）
+            const shouldApply = incAt === 0 || incAt >= curAt;
+            if (shouldApply && JSON.stringify(incoming) !== JSON.stringify(local)) {
+              await db().appConfig.update({ where: { id: 1 }, data: { groups: JSON.stringify(incoming) } });
+              if (incAt) {
+                await db().$executeRawUnsafe(
+                  "INSERT INTO NodeState (key, value) VALUES ('groupsUpdatedAt', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                  String(incAt)
+                ).catch(() => {});
+              }
+            }
           }
+        } else if (kind === 'theme') {
         } else if (kind === 'theme') {
           // 【修复】themeAccent 是后加列，Prisma client 未重新生成时会报 Unknown argument，
           // 必须像 index.js 一样用 raw SQL 单独写；其余字段走 Prisma。
@@ -333,10 +356,17 @@ async function applyChange(change) {
             ).catch(() => {});
           }
         } else if (kind === 'uiPrefs') {
+          // 【v3.30.0】改成"合并"而不是"覆盖"：
+          //   A 节点改 gridCols、B 节点改 searchEngine
+          //   全量覆盖会让后到的把先到的键冲掉
           try {
+            const cur = await db().appConfig.findUnique({ where: { id: 1 } });
+            let local = {};
+            try { local = JSON.parse(cur?.uiPrefs || '{}') || {}; } catch { local = {}; }
+            const merged = { ...local, ...(data || {}) };
             await db().$executeRawUnsafe(
               'UPDATE AppConfig SET uiPrefs = ? WHERE id = 1',
-              JSON.stringify(data || {}).slice(0, 4000)
+              JSON.stringify(merged).slice(0, 4000)
             );
           } catch { /* 列可能不存在 */ }
         } else if (kind === 'webdav') {

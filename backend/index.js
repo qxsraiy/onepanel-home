@@ -3145,7 +3145,7 @@ app.put('/api/config/theme', authenticateToken, ah(async (req, res) => {
     where: { id: 1 },
     data: {
       themeBg, themeColor, siteIcon, bgImage, siteTitle, footerText,
-      groups: Array.isArray(groups) ? JSON.stringify(groups) : (groups ?? null),
+      groups: undefined,   // 分组不在这里改（有独立接口，且这里传 undefined 才能不被 Prisma 写成 null）
       cardBgColor,
       cardBgOpacity: parseOpacity(cardBgOpacity),
     },
@@ -3159,6 +3159,14 @@ app.put('/api/config/theme', authenticateToken, ah(async (req, res) => {
     }
   }
   await broadcastConfig('theme', { themeBg, themeColor, themeAccent, siteIcon, bgImage: undefined, siteTitle, footerText, cardBgColor, cardBgOpacity });
+  // 【v3.30.0】如果这次请求带了 groups 数组，走独立的分组广播（带时间戳）
+  if (Array.isArray(groups) && groups.length) {
+    const cleanedGroups = [...new Set(groups.map((g) => String(g).trim()).filter(Boolean))];
+    if (cleanedGroups.length) {
+      await prisma.appConfig.update({ where: { id: 1 }, data: { groups: JSON.stringify(cleanedGroups) } }).catch(() => {});
+      await broadcastConfig('groups', { groups: cleanedGroups, updatedAt: Date.now() });
+    }
+  }
   res.json({ success: true });
   scheduleBackup();
 }));
@@ -3176,7 +3184,7 @@ app.put('/api/config/groups', authenticateToken, ah(async (req, res) => {
   if (cleaned.length === 0) return res.status(400).json({ error: '至少保留一个分组' });
   await prisma.appConfig.update({ where: { id: 1 }, data: { groups: JSON.stringify(cleaned) } });
   scheduleBackup();
-    await broadcastConfig('groups', cleaned);
+    await broadcastConfig('groups', { groups: cleaned, updatedAt: Date.now() });
   res.json({ success: true, groups: cleaned });
 }));
 
